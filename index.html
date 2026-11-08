@@ -190,7 +190,7 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
     <div id="fbStatus" class="fb-status" aria-live="polite">Caricamento scheda…</div>
     <div id="fbStats" class="fb-stats"></div>
     <div id="fbData"></div>
-    <div class="fb-sources">Fonte: CIA World Factbook, ultima edizione archiviata (gennaio 2026). La CIA ha cessato la pubblicazione il 4 febbraio 2026. I dati non rappresentano necessariamente valori aggiornati al 2026. Testi originali in inglese.<div id="fbCiteLinks"></div></div>
+    <div class="fb-sources">Fonte: CIA World Factbook, ultima edizione archiviata (gennaio 2026). La CIA ha cessato la pubblicazione il 4 febbraio 2026. I dati non rappresentano necessariamente valori aggiornati al 2026. Traduzione italiana automatica a partire dall'originale inglese, disponibile con connessione Internet; verifica sempre i dati più importanti sulla fonte.<div id="fbCiteLinks"></div></div>
   </div>
   <div class="fb-footer"><button id="fbBack" class="fb-back">← Torna al globo</button><small>Seleziona un altro Stato<br>dopo aver chiuso la scheda</small></div>
 </section>
@@ -613,50 +613,242 @@ function getOverviewField(obj,sec,keys){let section=obj?.[sec];if(!section)retur
  const name=Object.keys(section).find(k=>keys.some(q=>k.toLowerCase()===q.toLowerCase()));
  return name?cleanVal(section[name]):'';
 }
-function fbStat(name,value){if(!value)return;let box=document.createElement('div');box.className='fb-stat';let key=document.createElement('span');key.className='fb-stat-key';key.textContent=name;let data=document.createElement('strong');data.textContent=value;box.append(key,data);$('fbStats').append(box);}
-function renderFactbook(data,place){
- let sections=Object.entries(data).filter(([name,val])=>val && typeof val==='object' && !Array.isArray(val));
- const q=$('fbStatus');q.textContent=sections.length+' sezioni del Factbook disponibili · Testi originali in inglese.';
+
+/* Traduzione su richiesta EN -> IT del testo storico CIA.
+ * Titoli locali; per i valori usa un traduttore online quando la sezione viene aperta.
+ * La fonte inglese resta disponibile in fondo alla scheda.
+ */
+Object.assign(FB_KEYS,{
+ 'Country name':'Nome ufficiale del Paese','Flag description':'Descrizione della bandiera',
+ 'Background':'Contesto storico','Location':'Ubicazione','Map references':'Riferimenti cartografici',
+ 'Area - comparative':'Superficie a confronto','Land boundaries':'Confini terrestri',
+ 'Coastline':'Sviluppo costiero','Maritime claims':'Acque territoriali',
+ 'Elevation':'Altitudine','Land use':'Uso del suolo','Irrigated land':'Terreni irrigati',
+ 'Major lakes':'Laghi principali','Major rivers':'Fiumi principali',
+ 'Natural hazards':'Rischi naturali','Geography - note':'Note geografiche',
+ 'Environment - current issues':'Problemi ambientali attuali',
+ 'Environment - international agreements':'Accordi ambientali internazionali',
+ 'Population distribution':'Distribuzione della popolazione','Nationality':'Nazionalità',
+ 'Age structure':'Struttura per età','Dependency ratios':'Indici di dipendenza',
+ 'Median age':'Età mediana','Birth rate':'Tasso di natalità',
+ 'Death rate':'Tasso di mortalità','Net migration rate':'Saldo migratorio',
+ 'Urbanization':'Urbanizzazione','Major urban areas - population':'Principali aree urbane',
+ 'Sex ratio':'Rapporto tra i sessi','Maternal mortality ratio':'Mortalità materna',
+ 'Infant mortality rate':'Mortalità infantile','Total fertility rate':'Tasso di fecondità',
+ 'Contraceptive prevalence rate':'Diffusione della contraccezione',
+ 'Health expenditures':'Spesa sanitaria','Physicians density':'Densità di medici',
+ 'Hospital bed density':'Posti letto ospedalieri','Drinking water source':'Accesso all’acqua potabile',
+ 'Sanitation facility access':'Accesso ai servizi igienici',
+ 'HIV/AIDS - adult prevalence rate':'Prevalenza HIV/AIDS negli adulti',
+ 'Obesity - adult prevalence rate':'Prevalenza dell’obesità negli adulti',
+ 'Literacy':'Alfabetizzazione','School life expectancy':'Durata prevista dell’istruzione',
+ 'Education expenditures':'Spesa per istruzione','Unemployment, youth ages 15-24':'Disoccupazione giovanile',
+ 'Administrative divisions':'Suddivisioni amministrative','National holiday':'Festa nazionale',
+ 'Constitution':'Costituzione','Legal system':'Ordinamento giuridico',
+ 'International law participation':'Partecipazione al diritto internazionale',
+ 'Citizenship':'Cittadinanza','Suffrage':'Diritto di voto',
+ 'Executive branch':'Potere esecutivo','Legislative branch':'Potere legislativo',
+ 'Judicial branch':'Potere giudiziario',
+ 'Political parties and leaders':'Partiti politici e leader',
+ 'International organization participation':'Partecipazione alle organizzazioni internazionali',
+ 'Diplomatic representation in the US':'Rappresentanza diplomatica negli USA',
+ 'Diplomatic representation from the US':'Rappresentanza diplomatica degli USA',
+ 'National symbol(s)':'Simboli nazionali','National anthem':'Inno nazionale',
+ 'Economy - overview':'Quadro economico','Real GDP growth rate':'Crescita del PIL reale',
+ 'Real GDP per capita (purchasing power parity)':'PIL reale pro capite (PPA)',
+ 'Inflation rate (consumer prices)':'Inflazione (prezzi al consumo)',
+ 'Labor force':'Forza lavoro','Labor force by occupation':'Occupazione per settore',
+ 'Unemployment rate':'Tasso di disoccupazione',
+ 'Population below poverty line':'Popolazione sotto la soglia di povertà',
+ 'Gini Index coefficient - distribution of family income':'Indice di Gini',
+ 'Household income or consumption by percentage share':'Distribuzione dei redditi e consumi',
+ 'Budget':'Bilancio pubblico','Public debt':'Debito pubblico',
+ 'Taxes and other revenues':'Imposte ed entrate','Industries':'Industrie',
+ 'Industrial production growth rate':'Crescita della produzione industriale',
+ 'Agricultural products':'Prodotti agricoli','Exports - partners':'Partner delle esportazioni',
+ 'Imports - partners':'Partner delle importazioni','Exchange rates':'Tassi di cambio',
+ 'Fiscal year':'Anno fiscale','Economic aid - recipient':'Aiuti economici ricevuti',
+ 'Electricity access':'Accesso all’elettricità','Electricity - production':'Produzione elettrica',
+ 'Electricity - consumption':'Consumo di elettricità',
+ 'Electricity - imports':'Importazioni di elettricità',
+ 'Electricity - exports':'Esportazioni di elettricità',
+ 'Electricity - installed generating capacity':'Capacità elettrica installata',
+ 'Electricity - installed generating capacity by source':'Capacità elettrica per fonte',
+ 'Telephones - fixed lines':'Telefonia fissa','Telephones - mobile cellular':'Telefonia mobile',
+ 'Broadcast media':'Mezzi radiotelevisivi','Internet country code':'Dominio Internet nazionale',
+ 'Internet users':'Utenti Internet','Broadband - fixed subscriptions':'Abbonamenti a banda larga fissa',
+ 'Airports':'Aeroporti','Railways':'Ferrovie','Roadways':'Rete stradale',
+ 'Waterways':'Vie navigabili','Merchant marine':'Marina mercantile',
+ 'Ports and terminals':'Porti e terminal',
+ 'Military and security forces':'Forze armate e di sicurezza',
+ 'Military expenditures':'Spesa militare',
+ 'Military service age and obligation':'Età e obblighi di servizio militare',
+ 'Military equipment inventories and acquisitions':'Dotazioni e acquisizioni militari',
+ 'Terrorist group(s)':'Gruppi terroristici',
+ 'Disputes - international':'Controversie internazionali',
+ 'Refugees and internally displaced persons':'Rifugiati e sfollati interni',
+ 'Trafficking in persons':'Tratta di esseri umani','Illicit drugs':'Droghe illecite',
+ 'Capital - note':'Note sulla capitale','Government - note':'Note sul governo',
+ 'People - note':'Note sulla popolazione','Economy - note':'Note economiche'
+});
+const CIA_IT_CACHE=new Map();
+const CIA_TRANSLATION_MAX=750;
+function splitCIAEnglish(str,max=CIA_TRANSLATION_MAX){
+ const parts=[];let rest=str.trim();
+ while(rest.length>max){
+  let cut=rest.lastIndexOf(' ',max);
+  if(cut<max/3)cut=max;
+  parts.push(rest.slice(0,cut));rest=rest.slice(cut).trimStart();
+ }
+ if(rest)parts.push(rest);
+ return parts;
+}
+async function translateCIAPiece(str){
+ const google='https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=it&dt=t&q='+encodeURIComponent(str);
+ try{
+  const response=await fetch(google,{mode:'cors',cache:'force-cache'});
+  if(!response.ok)throw Error('Traduttore non disponibile: HTTP '+response.status);
+  const data=await response.json();
+  const out=Array.isArray(data?.[0])?data[0].map(a=>a?.[0]||'').join(''):'';
+  if(!out.trim())throw Error('Traduzione vuota');
+  return out;
+ }catch(primaryError){
+  // Servizio di riserva: MyMemory (senza chiavi), limitato a 500 byte per richiesta.
+  // Non nascondere mai un mancato servizio dietro a un finto testo italiano.
+  if(new TextEncoder().encode(str).length>480)throw primaryError;
+  const fallback='https://api.mymemory.translated.net/get?langpair=en%7Cit&q='+encodeURIComponent(str);
+  const response=await fetch(fallback,{mode:'cors',cache:'no-store'});
+  if(!response.ok)throw primaryError;
+  const data=await response.json();
+  const translated=data?.responseData?.translatedText;
+  if(Number(data?.responseStatus)!==200||typeof translated!=='string'||!translated.trim()
+   ||/MYMEMORY WARNING|YOU USED ALL AVAILABLE FREE TRANSLATIONS/i.test(translated))
+   throw primaryError;
+  const tmp=document.createElement('textarea');tmp.innerHTML=translated;
+  return tmp.value;
+ }
+}
+async function translateCIAText(source){
+ const str=String(source||'').trim();
+ if(!str||!/[A-Za-z]{2}/.test(str))return str;
+ if(CIA_IT_CACHE.has(str))return CIA_IT_CACHE.get(str);
+ const promise=(async()=>{
+  const parts=splitCIAEnglish(str),translated=[];
+  for(const part of parts)translated.push(await translateCIAPiece(part));
+  return translated.join(' ');
+ })();
+ CIA_IT_CACHE.set(str,promise);
+ try{return await promise;}catch(err){CIA_IT_CACHE.delete(str);throw err;}
+}
+function translateCIAStat(el,original,token){
+ if(!el||!original)return;
+ el.textContent='Traduzione in corso…';el.title='Originale: '+original;
+ translateCIAText(original).then(t=>{
+  if(token!==factToken)return;
+  el.textContent=t.length>98?t.slice(0,95)+'…':t;
+ }).catch(()=>{
+  if(token!==factToken)return;
+  el.textContent='Originale: '+(original.length>80?original.slice(0,77)+'…':original);
+ });
+}
+function translateCIASection(detail,token){
+ if(detail.dataset.translationStarted==='true')return;
+ detail.dataset.translationStarted='true';
+ const items=Array.from(detail.querySelectorAll('.fb-entry'));let next=0,done=0,failed=0;
+ const status=$('fbStatus'),total=items.length;
+ async function worker(){
+  while(next<total&&token===factToken){
+   const item=items[next++],dt=item.querySelector('dt'),dd=item.querySelector('dd');
+   try{
+    const [itValue,itKey]=await Promise.all([
+     translateCIAText(item._ciaOriginal),
+     item._ciaUntranslatedKey?translateCIAText(item._ciaUntranslatedKey):Promise.resolve(null)
+    ]);
+    if(token!==factToken)return;
+    dd.textContent=itValue;
+    if(itKey)dt.textContent=itKey;
+    item.dataset.search+=' '+itValue.toLocaleLowerCase('it')+' '+dt.textContent.toLocaleLowerCase('it');
+   }catch(err){
+    if(token!==factToken)return;
+    ++failed;dd.textContent='Traduzione non disponibile · Originale inglese: '+item._ciaOriginal;
+   }
+   ++done;
+   if(token===factToken)status.textContent='Traduzione italiana: '+done+'/'+total+' voci della sezione corrente…';
+  }
+ }
+ Promise.all(Array.from({length:Math.min(3,total)},()=>worker())).then(()=>{
+  if(token!==factToken)return;
+  status.textContent=failed?('Traduzione completata con '+failed+' voci non tradotte per limiti del servizio online.'):
+    'Sezione tradotta in italiano automaticamente · Consulta l’originale CIA per verificare i dati.';
+ });
+}
+
+function fbStat(name,value){if(!value)return null;let box=document.createElement('div');box.className='fb-stat';let key=document.createElement('span');key.className='fb-stat-key';key.textContent=name;let data=document.createElement('strong');data.textContent=value;box.append(key,data);$('fbStats').append(box);return data;}
+function renderFactbook(data,place,token){
+ const sections=Object.entries(data).filter(([name,val])=>val && typeof val==='object' && !Array.isArray(val));
+ const status=$('fbStatus');
+ status.textContent=sections.length+' sezioni disponibili · I testi vengono tradotti in italiano quando apri una sezione.';
  $('fbStats').replaceChildren();
- const compact=v=>v.length>98?v.slice(0,95)+'…':v;
  const field=(section,key)=>data?.[section]?.[key];
  const direct=(section,key,subfields=[])=>{
   const obj=field(section,key);if(!obj)return '';
-  for(const sf of subfields){let k=Object.keys(obj).find(x=>x.trim().toLowerCase()===sf.toLowerCase());if(k){let txt=cleanVal(obj[k]);if(txt)return txt.split('\n')[0];}}
+  for(const sf of subfields){
+   const k=Object.keys(obj).find(x=>x.trim().toLowerCase()===sf.toLowerCase());
+   if(k){let txt=cleanVal(obj[k]);if(txt)return txt.split('\n')[0];}
+  }
   return cleanVal(obj).split('\n')[0]||'';
  };
- fbStat('🏛 Capitale',compact(direct('Government','Capital',['name','text'])));
- fbStat('◉ Popolazione',compact(direct('People and Society','Population',['total','text'])));
- fbStat('▣ Superficie',compact(direct('Geography','Area',['total','text'])));
- fbStat('⚖ Forma di governo',compact(direct('Government','Government type',['text'])));
+ for(const [label,raw] of [
+  ['🏛 Capitale',direct('Government','Capital',['name','text'])],
+  ['◉ Popolazione',direct('People and Society','Population',['total','text'])],
+  ['▣ Superficie',direct('Geography','Area',['total','text'])],
+  ['⚖ Forma di governo',direct('Government','Government type',['text'])]
+ ]){
+  const element=fbStat(label,raw);
+  if(element)translateCIAStat(element,raw,token);
+ }
  const target=$('fbData');target.replaceChildren();
- let title=document.createElement('div');title.className='fb-tabtitle';title.textContent='Esplora tutti i dati originali';target.append(title);
- let search=document.createElement('input');search.className='fb-search';search.type='search';search.placeholder='Filtra tra argomenti e caratteristiche…';search.setAttribute('aria-label','Cerca nelle caratteristiche del Factbook');target.append(search);
- let group=document.createElement('div');group.id='fbSections';target.append(group);
+ const title=document.createElement('div');title.className='fb-tabtitle';title.textContent='Esplora tutti i dati in italiano';target.append(title);
+ const search=document.createElement('input');search.className='fb-search';search.type='search';
+ search.placeholder='Cerca tra argomenti e caratteristiche…';search.setAttribute('aria-label','Cerca nei contenuti del Factbook');target.append(search);
+ const group=document.createElement('div');group.id='fbSections';target.append(group);
  for(const [cat,obj] of sections){
-  const detail=document.createElement('details');detail.className='fb-section';detail.dataset.cat=cat.toLowerCase();
+  const detail=document.createElement('details');detail.className='fb-section';
+  detail.dataset.cat=(FBCATS[cat]||cat).toLocaleLowerCase('it');
   const summary=document.createElement('summary');
-  let icon=document.createElement('span');icon.textContent=CAT_ICONS[cat]||'◈';
-  let st=document.createElement('span');st.textContent=FBCATS[cat]||cat;
-  let count=document.createElement('span');count.className='fb-count';count.textContent=Object.keys(obj).length+' voci';
+  const icon=document.createElement('span');icon.textContent=CAT_ICONS[cat]||'◈';
+  const st=document.createElement('span');st.textContent=FBCATS[cat]||cat;
+  if(!FBCATS[cat])translateCIAText(cat).then(it=>{if(token===factToken)st.textContent=it;}).catch(()=>{});
+  const count=document.createElement('span');count.className='fb-count';
+  count.textContent=Object.keys(obj).length+' voci';
   summary.append(icon,st,count);
   const body=document.createElement('div');body.className='fb-section-body';
   for(const [field,val] of Object.entries(obj)){
-   const item=document.createElement('dl');item.className='fb-entry';let dt=document.createElement('dt');dt.textContent=FB_KEYS[field]||field;
-   let dd=document.createElement('dd');dd.textContent=cleanVal(val);item.dataset.search=(field+' '+dd.textContent).toLocaleLowerCase();
+   const item=document.createElement('dl');item.className='fb-entry';
+   const dt=document.createElement('dt');dt.textContent=FB_KEYS[field]||field;
+   const dd=document.createElement('dd');
+   const original=cleanVal(val);
+   dd.textContent='Traduzione italiana disponibile aprendo questa sezione…';
+   dd.title='Valore originale disponibile presso la fonte CIA';
+   item._ciaOriginal=original;item._ciaUntranslatedKey=FB_KEYS[field]?null:field;
+   item.dataset.search=(field+' '+dt.textContent+' '+original).toLocaleLowerCase('it');
    item.append(dt,dd);body.append(item);
   }
   detail.append(summary,body);group.append(detail);
+  detail.addEventListener('toggle',()=>{if(detail.open)translateCIASection(detail,token);});
  }
- group.querySelector('details')?.setAttribute('open','');
+ const first=group.querySelector('details');
+ if(first){first.open=true;translateCIASection(first,token);}
  search.addEventListener('input',()=>{
-  const needle=search.value.trim().toLocaleLowerCase();
+  const needle=search.value.trim().toLocaleLowerCase('it');
   for(const sec of group.querySelectorAll('.fb-section')){
-    let visible=0;for(const item of sec.querySelectorAll('.fb-entry')){
-       const yes=!needle||item.dataset.search.includes(needle)||sec.dataset.cat.includes(needle);item.hidden=!yes;if(yes)visible++;
-    }
-    sec.hidden=!visible;
-    if(needle&&visible)sec.open=true;
+   let visible=0;
+   for(const item of sec.querySelectorAll('.fb-entry')){
+    const yes=!needle||item.dataset.search.includes(needle)||sec.dataset.cat.includes(needle);
+    item.hidden=!yes;if(yes)visible++;
+   }
+   sec.hidden=!visible;
+   if(needle&&visible)sec.open=true;
   }
  });
 }
@@ -702,7 +894,7 @@ async function openFactbook(country){
  if(!meta.path){$('fbStatus').textContent='Nessuna scheda storica CIA disponibile per questa entità.';const card=document.createElement('div');card.className='fb-empty';card.textContent='Il globo identifica questa zona, ma non è stata trovata una corrispondenza verificabile con una scheda dell’ultima edizione del CIA World Factbook. Nessun dato viene attribuito alla CIA senza una fonte.';$('fbData').append(card);return;}
  try{
   const d=await fetchArchivedFactbook(meta);if(token!==factToken)return;
-  renderFactbook(d,country);
+  renderFactbook(d,country,token);
  }catch(err){if(token!==factToken)return;
   $('fbStatus').textContent='Scheda non caricata';let box=document.createElement('div');box.className='fb-empty';box.textContent=err.message+' Il globo e le sue mappe restano utilizzabili offline. Le schede CIA richiedono la rete al primo accesso.';
   let b=document.createElement('button');b.className='fb-retry';b.textContent='↻ Riprova';b.addEventListener('click',()=>openFactbook(country));box.append(document.createElement('br'),b);$('fbData').append(box);
