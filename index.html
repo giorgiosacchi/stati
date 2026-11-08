@@ -135,7 +135,7 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
 .fb-back:hover{background:#2b7a91}
 .fb-footer small{font-size:10px;color:#94adbe;line-height:1.3;text-align:right}
 .highres-btn{position:relative;white-space:nowrap;font-size:12px;min-height:38px;border:1px solid #679bb6;background:#103449;color:#b5f0ff;border-radius:10px;padding:6px 11px;cursor:pointer}
-.highres-btn:disabled{opacity:.5;cursor:wait}
+.highres-btn:disabled{opacity:.5;cursor:wait}.highres-btn.active{background:#14516b;border-color:#8ddff5;color:#fff}
 #resBadge{position:absolute;left:13px;bottom:70px;z-index:2;padding:7px 10px;border:1px solid #5ba6b67a;background:#091e2b99;border-radius:20px;color:#a9dcea;font-size:10px;pointer-events:none}
 @media(max-width:690px){#factbookDrawer{top:0;bottom:0;left:0;right:0;width:100%;border:0;border-radius:0;animation:sheetMobile .25s ease}@keyframes sheetMobile{from{transform:translateY(24px);opacity:.5}to{transform:translateY(0);opacity:1}}.fb-hero{padding:18px 17px 16px}.fb-scroll{padding:15px 16px 22px}.fb-flag{min-width:65px}.fb-flag img{width:65px}.fb-stats{gap:7px}.fb-stat{padding:10px}.fb-footer{padding:10px 15px}#resBadge{font-size:9px;bottom:67px}}
 @media(max-width:365px){.fb-stat strong{font-size:14px}.fb-subtitle{font-size:11px}}
@@ -219,7 +219,7 @@ function updateZoom(){$('zoomSlider').value=Math.round(100*(maxDist-dist)/(maxDi
 function setAuto(v){automatic=!!v;$('autoBtn').textContent=automatic?'Attiva':'Ferma';$('autoBtn').classList.toggle('on',automatic);$('autoBtn').setAttribute('aria-pressed',automatic);$('spinBtn').textContent=automatic?'❚❚ Pausa':'▶ Rotazione';$('spinBtn').classList.toggle('active',automatic);$('spinBtn').setAttribute('aria-pressed',automatic);}
 function setBorders(v){showBorders=!!v;$('bordersBtn').classList.toggle('on',showBorders);$('bordersBtn').textContent=showBorders?'Visibili':'Nascosti';$('bordersBtn').setAttribute('aria-pressed',showBorders);drawRequested=true;}
 function setNames(v){showNames=!!v;$('namesBtn').classList.toggle('on',showNames);$('namesBtn').textContent=showNames?'Visibili':'Nascosti';$('namesBtn').setAttribute('aria-pressed',showNames);updateLabels(true);}
-function setMode(v){mode=v;$('physicalBtn').classList.toggle('active',v==='physical');$('satelliteBtn').classList.toggle('active',v==='satellite');$('physicalBtn').setAttribute('aria-pressed',v==='physical');$('satelliteBtn').setAttribute('aria-pressed',v==='satellite');drawRequested=true;}
+function setMode(v){mode=v;$('physicalBtn').classList.toggle('active',v==='physical');$('satelliteBtn').classList.toggle('active',v==='satellite');$('physicalBtn').setAttribute('aria-pressed',v==='physical');$('satelliteBtn').setAttribute('aria-pressed',v==='satellite');drawRequested=true;updateMapBadge();}
 function reset(){lat=41.5;lon=13;dist=3;setAuto(false);updateZoom();const initial=countries.find(c=>c[0]==='Italia');showPosition(lat,lon,initial||null);drawRequested=true;}
 
 function compile(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error('Shader: '+gl.getShaderInfoLog(s));return s;}
@@ -542,10 +542,14 @@ const NASA_BASE='https://assets.science.nasa.gov/content/dam/science/esd/eo/imag
 const NASA_PHYSICAL=NASA_BASE+'bmng-topography-bathymetry/january/world.topo.bathy.200401.3x5400x2700.jpg';
 const NASA_ULTRA=NASA_BASE+'bmng-topography-bathymetry/january/world.topo.bathy.200401.3x21600x10800.jpg';
 let hdApplied=false,hdLoading=false,nasaActive=false,nasaLabel='';
+function updateMapBadge(){
+ $('resBadge').textContent=mode==='satellite'?'Mappa satellitare · 4096 × 2048':
+  (nasaActive?nasaLabel:'Mappa fisica incorporata · 4096 × 2048');
+}
 function updateNASAButton(){
  const b=$('hiResBtn');b.setAttribute('aria-pressed',String(nasaActive));b.classList.toggle('active',nasaActive);
  b.textContent=nasaActive?'✓ NASA HD: disattiva':'⇧ NASA HD: attiva';
- $('resBadge').textContent=nasaActive?nasaLabel:'Mappa incorporata · 4096 × 2048';
+ updateMapBadge();
 }
 async function upgradeMap(source=NASA_PHYSICAL,requestedUltra=false,silent=false){
  if(hdLoading)return;
