@@ -150,7 +150,6 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
     <button id="spinBtn" class="btn words" aria-pressed="false">▶ Rotazione</button>
     <button id="homeIcon" class="btn iconbtn" title="Vista iniziale" aria-label="Vista iniziale">⌂</button>
     <button id="installBtn" class="btn iconbtn" title="Installa Terra 3D" aria-label="Installa Terra 3D">⇩</button>
-    <button id="fullBtn" class="btn iconbtn" title="Schermo intero" aria-label="Schermo intero">⛶</button>
   </div>
 </header>
 <section class="topbar" aria-label="Esplora il pianeta e comandi della mappa">
@@ -159,7 +158,7 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
     <form class="searchbar" id="searchForm"><input id="search" type="search" list="countrylist" placeholder="Cerca uno Stato…" autocomplete="off" aria-label="Cerca uno Stato"><datalist id="countrylist"></datalist><button type="submit" title="Cerca" aria-label="Cerca">⌕</button></form>
     <div class="mode-row"><button class="btn active" id="physicalBtn" type="button" aria-pressed="true">⛰ Fisica</button><button class="btn" id="satelliteBtn" type="button" aria-pressed="false">◉ Satellite</button></div>
     <div class="zoom-controls"><button class="btn" id="zoomOut" aria-label="Riduci ingrandimento">−</button><input id="zoomSlider" type="range" min="0" max="100" value="61" aria-label="Ingrandimento del globo"><button class="btn" id="zoomIn" aria-label="Ingrandisci">+</button></div>
-    <button type="button" class="highres-btn" id="hiResBtn" title="Carica la vera cartografia NASA ad alta risoluzione (richiede Internet)">⇧ HD NASA</button>
+    <button type="button" class="highres-btn" id="hiResBtn" title="Attiva o disattiva la cartografia fisica NASA HD (richiede Internet la prima volta)" aria-pressed="false">⇧ NASA HD: attiva</button>
     <button type="button" class="btn options-btn" id="moreBtn" aria-expanded="false" aria-controls="extraControls">⚙ Opzioni ▾</button>
   </div>
   <div class="topbar-secondary" id="extraControls" hidden>
@@ -209,7 +208,7 @@ const gl=canvas.getContext('webgl',{antialias:true,alpha:true,depth:true,preserv
 let lat=41.5,lon=13.0,dist=3.00,automatic=false,showBorders=true,showNames=false,selected=null,mode='physical';
 const near=.1,far=100,fovy=42*Math.PI/180,minDist=1.15,maxDist=5.7;
 const softwareMode=!gl;let softwareCtx=null,softwareMaps={},softwareBorders=null,lastSoftwarePaint=0;
-let pixelWidth=0,pixelHeight=0,cssWidth=0,cssHeight=0,texturePhysical,textureSatellite,program,linesProgram,mesh,indexCount,lineBuffer,lineVertexCount;
+let pixelWidth=0,pixelHeight=0,cssWidth=0,cssHeight=0,texturePhysical,textureSatellite,textureNASA,program,linesProgram,mesh,indexCount,lineBuffer,lineVertexCount;
 let lastTime=0,ready=false,lastLabels=0,drawRequested=true;
 const RAD=Math.PI/180;
 
@@ -382,7 +381,7 @@ function render(){if(!ready)return;if(softwareMode){renderSoftware();return;}gl.
  gl.enableVertexAttribArray(pos);gl.vertexAttribPointer(pos,3,gl.FLOAT,false,20,0);
  gl.enableVertexAttribArray(uv);gl.vertexAttribPointer(uv,2,gl.FLOAT,false,20,12);
  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,mesh.indices);
- gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,mode==='physical'?texturePhysical:textureSatellite);gl.uniform1i(gl.getUniformLocation(program,'map'),0);
+ gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,mode==='physical'?(nasaActive&&textureNASA?textureNASA:texturePhysical):textureSatellite);gl.uniform1i(gl.getUniformLocation(program,'map'),0);
  gl.drawElements(gl.TRIANGLES,indexCount,gl.UNSIGNED_SHORT,0);
  gl.disableVertexAttribArray(uv);gl.disableVertexAttribArray(pos);
  if(showBorders){gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);uniforms(linesProgram,mat);
@@ -488,7 +487,6 @@ $('autoBtn').onclick=()=>setAuto(!automatic);$('spinBtn').onclick=()=>setAuto(!a
 $('homeBtn').onclick=reset;$('homeIcon').onclick=reset;
 $('moreBtn').onclick=()=>{const extra=$('extraControls');extra.hidden=!extra.hidden;$('moreBtn').textContent=extra.hidden?'⚙ Opzioni ▾':'⚙ Chiudi ▴';$('moreBtn').setAttribute('aria-expanded',String(!extra.hidden));};
 $('searchForm').addEventListener('submit',e=>{e.preventDefault();searchCountry();});
-$('fullBtn').onclick=()=>{if(document.fullscreenElement){document.exitFullscreen?.();}else{document.documentElement.requestFullscreen?.().catch(()=>{});}};
 function init(){
  try{
   if(softwareMode){softwareCtx=canvas.getContext('2d',{alpha:true});if(!softwareCtx)throw Error('Canvas 2D non disponibile');}
@@ -543,9 +541,15 @@ if('serviceWorker' in navigator && (location.protocol==='https:'||location.hostn
 const NASA_BASE='https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/';
 const NASA_PHYSICAL=NASA_BASE+'bmng-topography-bathymetry/january/world.topo.bathy.200401.3x5400x2700.jpg';
 const NASA_ULTRA=NASA_BASE+'bmng-topography-bathymetry/january/world.topo.bathy.200401.3x21600x10800.jpg';
-let hdApplied=false,hdLoading=false;
+let hdApplied=false,hdLoading=false,nasaActive=false,nasaLabel='';
+function updateNASAButton(){
+ const b=$('hiResBtn');b.setAttribute('aria-pressed',String(nasaActive));b.classList.toggle('active',nasaActive);
+ b.textContent=nasaActive?'✓ NASA HD: disattiva':'⇧ NASA HD: attiva';
+ $('resBadge').textContent=nasaActive?nasaLabel:'Mappa incorporata · 4096 × 2048';
+}
 async function upgradeMap(source=NASA_PHYSICAL,requestedUltra=false,silent=false){
- if(hdLoading||!gl)return;
+ if(hdLoading)return;
+ if(!gl){showInstallToast('La mappa NASA HD richiede WebGL sul dispositivo.');return;}
  hdLoading=true;const button=$('hiResBtn');button.disabled=true;button.textContent='Caricamento NASA…';
  try{
   const response=await fetch(source,{mode:'cors',cache:'force-cache'});if(!response.ok)throw Error('HTTP '+response.status);
@@ -560,23 +564,27 @@ async function upgradeMap(source=NASA_PHYSICAL,requestedUltra=false,silent=false
   if(desiredWidth<1024)throw Error('Scheda grafica non compatibile');
   let work=img;
   if(img.width>desiredWidth){let c=document.createElement('canvas');c.width=desiredWidth;c.height=desiredWidth/2;c.getContext('2d',{alpha:false}).drawImage(img,0,0,c.width,c.height);work=c;}
-  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texturePhysical);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,!physicalSouthUp(img));
+  if(!textureNASA)textureNASA=makeTexture();
+   gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,textureNASA);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,!physicalSouthUp(img));
   // WebGL1 accepts non-power-of-two textures only without mipmaps and with CLAMP_TO_EDGE.
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,work);
   if(work.width && (work.width&(work.width-1))===0 && (work.height&(work.height-1))===0){gl.generateMipmap(gl.TEXTURE_2D);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);}
-  hdApplied=true;drawRequested=true;
-  $('resBadge').textContent='NASA Blue Marble · '+work.width+' × '+work.height;
-  button.textContent=requestedUltra?'✓ NASA ultra HD':'✓ NASA HD';
-  if(!silent)showInstallToast('Mappa NASA ad alta definizione caricata. Puoi ingrandire ulteriormente.');
- }catch(err){console.warn('NASA HD non caricata',err);button.textContent='⇧ HD NASA';if(!silent)showInstallToast('Mappa HD non disponibile: resta attiva la cartografia offline.');}
+  hdApplied=true;nasaActive=true;nasaLabel='NASA Blue Marble · '+work.width+' × '+work.height;
+  drawRequested=true;updateNASAButton();
+  if(!silent)showInstallToast('NASA HD attivata. Premi di nuovo il pulsante per tornare alla mappa fisica originale.');
+ }catch(err){console.warn('NASA HD non caricata',err);updateNASAButton();if(!silent)showInstallToast('Mappa NASA non disponibile: resta attiva la cartografia fisica incorporata.');}
  finally{hdLoading=false;button.disabled=false;}
 }
 $('hiResBtn').addEventListener('click',()=>{
- if(hdApplied && ((navigator.deviceMemory||4)>=6) && window.innerWidth>=850){
-  if(confirm('Caricare la cartografia NASA Ultra HD? Scarica circa 30 MB e può richiedere molta memoria. Consigliato su PC.')) upgradeMap(NASA_ULTRA,true);
- }else if(hdApplied){showInstallToast('La mappa NASA HD è già attiva.');}
- else upgradeMap(NASA_PHYSICAL,false);
+ if(nasaActive){
+  nasaActive=false;updateNASAButton();drawRequested=true;
+  showInstallToast('NASA HD disattivata: ripristinata la cartografia fisica originale.');
+ }else if(hdApplied&&textureNASA){
+  nasaActive=true;setMode('physical');updateNASAButton();drawRequested=true;
+ }else{
+  setMode('physical');upgradeMap(NASA_PHYSICAL,false);
+ }
 });
 // NASA HD rimane un'opzione esplicita: nessun caricamento automatico all'avvio.
 
