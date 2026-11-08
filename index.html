@@ -291,8 +291,28 @@ function makeBorders(){
  lineVertexCount=verts.length/3;lineBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,lineBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(verts),gl.STATIC_DRAW);
 }
 function makeTexture(){const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,1,1,0,gl.RGB,gl.UNSIGNED_BYTE,new Uint8Array([40,92,134]));gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);return tex;}
-function uploadTexture(tex,b64,done){const img=new Image();img.onload=()=>{
-  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+// Individua automaticamente se la texture fisica ha Nord e Sud invertiti.
+function physicalSouthUp(source){
+ const c=document.createElement('canvas');c.width=720;c.height=360;
+ const ctx=c.getContext('2d',{willReadFrequently:true});
+ ctx.drawImage(source,0,0,c.width,c.height);
+ const d=ctx.getImageData(0,0,c.width,c.height).data;
+ function seaBlue(latitude,longitude){
+  const x=Math.max(0,Math.min(c.width-1,Math.round((longitude+180)/360*(c.width-1))));
+  const y=Math.max(0,Math.min(c.height-1,Math.round((.5-latitude/180)*(c.height-1))));
+  const i=(y*c.width+x)*4;
+  return (d[i+2]-d[i])+.35*(d[i+2]-d[i+1]);
+ }
+ // Punti terrestri (Siberia, USA, Arabia, Australia, Brasile, Tibet)
+ // con oceano alla latitudine opposta, usati soltanto per la carta fisica.
+ const land=[[55,100],[40,-100],[23,45],[-25,135],[-20,-60],[30,80]];
+ const delta=land.reduce((sum,[la,lo])=>sum+seaBlue(-la,lo)-seaBlue(la,lo),0);
+ return delta < -30;
+}
+function uploadTexture(tex,b64,done,isPhysical=false){const img=new Image();img.onload=()=>{
+  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);
+   // Conserva la cartografia satellitare; correggi i soli dati fisici se già capovolti.
+   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,!(isPhysical && physicalSouthUp(img)));
   let source=img,maxTex=gl.getParameter(gl.MAX_TEXTURE_SIZE);
    if(img.width>maxTex||img.height>maxTex){const limit=Math.min(2048,maxTex),c=document.createElement('canvas');c.width=limit;c.height=limit/2;c.getContext('2d').drawImage(img,0,0,c.width,c.height);source=c;}
    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,source);
@@ -304,7 +324,7 @@ function uploadTexture(tex,b64,done){const img=new Image();img.onload=()=>{
 function loadSoftwareMap(b64,key,onready){
  const img=new Image();img.onload=()=>{const cvs=document.createElement('canvas');cvs.width=2048;cvs.height=1024;
   const ctx=cvs.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,cvs.width,cvs.height);
-  softwareMaps[key]={data:ctx.getImageData(0,0,cvs.width,cvs.height).data,w:cvs.width,h:cvs.height};onready?.();drawRequested=true;
+  softwareMaps[key]={data:ctx.getImageData(0,0,cvs.width,cvs.height).data,w:cvs.width,h:cvs.height,southUp:key==='physical'&&physicalSouthUp(img)};onready?.();drawRequested=true;
  };img.onerror=()=>{loading.textContent='Errore nel caricamento della mappa incorporata.';};
  img.src=b64;
 }
@@ -328,7 +348,7 @@ function renderSoftware(){
    const zz=Math.sqrt(1-d2),y1=cl*yy+sl*zz,z1=-sl*yy+cl*zz,xw=co*xx+so*z1,zw=-so*xx+co*z1;
    const latMap=Math.asin(Math.max(-1,Math.min(1,y1))),lonMap=Math.atan2(xw,zw);
    let u=Math.floor((lonMap/Math.PI/2+.5)*tw),v=Math.floor((.5-latMap/Math.PI)*th);
-   u=((u%tw)+tw)%tw;v=Math.min(th-1,Math.max(0,v));const si=(v*tw+u)*4,di=(y*w+x)*4;
+   u=((u%tw)+tw)%tw;v=Math.min(th-1,Math.max(0,v));if(map.southUp)v=th-1-v;const si=(v*tw+u)*4,di=(y*w+x)*4;
    const lambert=Math.max(0,-.35*xx+.55*yy+zz)/1.19,shade=.82+.18*lambert;
    dst[di]=src[si]*shade;dst[di+1]=src[si+1]*shade;dst[di+2]=src[si+2]*shade;dst[di+3]=255;
   }
@@ -476,7 +496,7 @@ function init(){
   if(!softwareMode){makeMesh();makeBorders();texturePhysical=makeTexture();textureSatellite=makeTexture();}else{loadSoftwareBorders();}
   let loaded=0;function markLoaded(){if(++loaded>=1){loading.hidden=true;ready=true;drawRequested=true;}}
   if(softwareMode){loadSoftwareMap(PHYSICAL_B64,'physical',markLoaded);loadSoftwareMap(SATELLITE_B64,'satellite',markLoaded);}
-  else{uploadTexture(texturePhysical,PHYSICAL_B64,markLoaded);uploadTexture(textureSatellite,SATELLITE_B64,markLoaded);}
+  else{uploadTexture(texturePhysical,PHYSICAL_B64,markLoaded,true);uploadTexture(textureSatellite,SATELLITE_B64,markLoaded,false);}
   const opts=$('countrylist');for(const c of countries){const o=document.createElement('option');o.value=c[0];opts.append(o);}
   resize();new ResizeObserver(resize).observe(viewer);updateZoom();showPosition(lat,lon,countries.find(c=>c[0]==='Italia')||null);requestAnimationFrame(frame);
  }catch(err){console.error(err);loading.textContent='Impossibile avviare il globo 3D: '+err.message;}
@@ -540,7 +560,7 @@ async function upgradeMap(source=NASA_PHYSICAL,requestedUltra=false,silent=false
   if(desiredWidth<1024)throw Error('Scheda grafica non compatibile');
   let work=img;
   if(img.width>desiredWidth){let c=document.createElement('canvas');c.width=desiredWidth;c.height=desiredWidth/2;c.getContext('2d',{alpha:false}).drawImage(img,0,0,c.width,c.height);work=c;}
-  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texturePhysical);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texturePhysical);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,!physicalSouthUp(img));
   // WebGL1 accepts non-power-of-two textures only without mipmaps and with CLAMP_TO_EDGE.
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,work);
@@ -558,10 +578,7 @@ $('hiResBtn').addEventListener('click',()=>{
  }else if(hdApplied){showInstallToast('La mappa NASA HD è già attiva.');}
  else upgradeMap(NASA_PHYSICAL,false);
 });
-// In PWA connessa, preferisci la vera cartografia NASA HD in modo automatico, senza interrompere il globo.
-if(location.protocol==='https:' && navigator.onLine && !navigator.connection?.saveData){
- window.addEventListener('load',()=>setTimeout(()=>{if(!hdApplied&&!hdLoading)upgradeMap(NASA_PHYSICAL,false,true)},1500));
-}
+// NASA HD rimane un'opzione esplicita: nessun caricamento automatico all'avvio.
 
 
 /* SCHEDA FACTBOOK: dati originali CIA (archivio storico) su richiesta, senza valori inventati. */
