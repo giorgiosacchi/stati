@@ -85,16 +85,23 @@ function createCountryMedia() {
   ]);
   const primary = garden.value?.[code];
   const rows = (primary?.stations || []).map(([name, place, path]) => ({
-   name, place, href:radioGarden + path
+   name, place, href:radioGarden + path, preferred:true
   }));
   const primaryNames = new Set(rows.map(row => normalize(row.name)));
+  const stations = new Set();
   const urls = new Set();
   for (const station of browser.value || []) {
    const name = station.name?.trim();
-   const href = streamLink(station.url_resolved) || streamLink(station.url);
-   if (!name || !href || primaryNames.has(normalize(name)) || urls.has(href)) continue;
-   urls.add(href);
-   rows.push({name, place:station.state?.trim(), href});
+   const place = station.state?.trim();
+   const original = streamLink(station.url);
+   const href = original.startsWith('https:') ? original : streamLink(station.url_resolved) || original;
+   if (!name || !href || primaryNames.has(normalize(name))) continue;
+   const key = normalize(name) + '\n' + normalize(place || '');
+   const url = original || href;
+   if (stations.has(key) || urls.has(url)) continue;
+   stations.add(key);
+   urls.add(url);
+   rows.push({name, place, href});
   }
   return {rows, path:primary?.path, partial:garden.status === 'rejected' || browser.status === 'rejected'};
  }
@@ -201,7 +208,8 @@ function createCountryMedia() {
   setSources(type, result.path);
   entries = result.rows.map(row => ({
    ...row, search:normalize([row.name, row.place, italianPlaces[row.place]].filter(Boolean).join(' '))
-  })).sort((a, b) => sort.compare(a.name, b.name) || sort.compare(a.place || '', b.place || ''));
+  })).sort((a, b) => Number(!!b.preferred) - Number(!!a.preferred) ||
+   sort.compare(a.name, b.name) || sort.compare(a.place || '', b.place || ''));
   partial = result.partial;
   visible = batchSize;
   filter.hidden = !entries.length;
