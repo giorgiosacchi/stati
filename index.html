@@ -105,7 +105,12 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
 .fb-close{position:absolute;top:14px;right:15px;border:1px solid #64829b79;background:#1e3d55;color:#fff;width:39px;height:39px;border-radius:12px;font-size:26px;line-height:1;cursor:pointer}
 .fb-close:hover{background:#2e5e78}
 .fb-pill{display:inline-flex;background:#2a515a65;color:#aaf0cf;border:1px solid #659c9c5e;font-size:10px;border-radius:999px;letter-spacing:.5px;padding:5px 9px;margin-top:13px}
+.fb-pill[hidden]{display:none}
+.fb-media-nav{display:flex;gap:8px;margin-top:12px}
+.fb-media-nav .btn{flex:1;min-height:42px;font-weight:700}
+.fb-media-nav .btn[aria-pressed="true"]{background:#20596e;border-color:#8ddded;color:#fff}
 .fb-scroll{padding:18px 22px 25px;overflow:auto;overscroll-behavior:contain;scrollbar-color:#38566c transparent;flex:1}
+.fb-scroll[hidden],#fbMedia [hidden]{display:none}
 .fb-status{font-size:12px;color:#bfd1dc;line-height:1.5;margin-bottom:12px}
 .fb-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:18px}
 .fb-stat{background:#132a3f;border:1px solid #254d62;border-radius:13px;padding:12px;min-height:80px}
@@ -127,6 +132,18 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
 .fb-entry dd{font-size:12.5px;line-height:1.57;margin:0;color:#d9e3ee;white-space:pre-wrap;overflow-wrap:anywhere}
 .fb-sources{margin-top:17px;padding:12px 13px;border-radius:10px;background:#102939;color:#9dbfd2;font-size:11px;line-height:1.6}
 .fb-sources a{color:#92e4f6;text-decoration:underline;text-underline-offset:2px}
+.fb-media-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.fb-media-heading h3{margin:0;font-size:18px}
+.fb-media-heading .btn{font-size:12px;white-space:normal}
+.fb-media-sources{font-size:12px;color:#b0c7d9;line-height:1.5;margin:0 0 12px}
+.fb-media-sources a{color:#92e4f6;text-underline-offset:2px}
+.fb-media-list{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.fb-media-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#0b2030;border:1px solid #27475d;border-radius:12px;padding:8px 10px}
+.fb-media-row strong,.fb-media-row small{display:block;overflow-wrap:anywhere}
+.fb-media-row strong{font-size:14px}
+.fb-media-row small{margin-top:3px;color:#a7c6d9;font-size:12px}
+.fb-media-row .btn{flex:none;font-size:12px;min-height:44px;color:#a9efff;text-decoration:none}
+.fb-media-more{margin-top:12px}
 .fb-empty{border:1px dashed #436b81;border-radius:12px;padding:15px;color:#a8c1ce;font-size:13px;line-height:1.6}
 .fb-retry{margin-top:10px;display:inline-flex;padding:9px 11px;border-radius:10px;border:1px solid #6cabb9;background:#14526c;color:white;cursor:pointer;font-size:13px}
 .fb-offline-tag{color:#cfb98f}
@@ -184,7 +201,11 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
   <div class="fb-hero">
     <button id="fbClose" class="fb-close" aria-label="Chiudi scheda e torna al globo" title="Chiudi e torna alla Terra">×</button>
     <div class="fb-hero-top"><div id="fbFlag" class="fb-flag">🌐</div><div><div class="fb-eyebrow">Atlante · World Factbook</div><h2 id="fbCountry" class="fb-title">Stato</h2><div id="fbNative" class="fb-subtitle"></div></div></div>
-    <div class="fb-pill">CIA WORLD FACTBOOK · ARCHIVIO 2025 / GENNAIO 2026</div>
+    <div id="fbArchive" class="fb-pill">CIA WORLD FACTBOOK · ARCHIVIO 2025 / GENNAIO 2026</div>
+    <div class="fb-media-nav" role="group" aria-label="Emittenti del Paese">
+      <button class="btn" type="button" data-media="radio" aria-controls="fbMedia" aria-pressed="false">Radio</button>
+      <button class="btn" type="button" data-media="tv" aria-controls="fbMedia" aria-pressed="false">TV</button>
+    </div>
   </div>
   <div id="fbScroll" class="fb-scroll">
     <div id="fbStatus" class="fb-status" aria-live="polite">Caricamento scheda…</div>
@@ -192,8 +213,21 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
     <div id="fbData"></div>
     <div class="fb-sources">Fonte: CIA World Factbook, ultima edizione archiviata (gennaio 2026). La CIA ha cessato la pubblicazione il 4 febbraio 2026. I dati non rappresentano necessariamente valori aggiornati al 2026. Traduzione italiana automatica a partire dall'originale inglese, disponibile con connessione Internet; verifica sempre i dati più importanti sulla fonte.<div id="fbCiteLinks"></div></div>
   </div>
+  <section id="fbMedia" class="fb-scroll" aria-labelledby="fbMediaTitle" hidden>
+    <div class="fb-media-heading">
+      <h3 id="fbMediaTitle"></h3>
+      <button id="fbMediaBack" class="btn" type="button">← Dati del Paese</button>
+    </div>
+    <p id="fbMediaSources" class="fb-media-sources"></p>
+    <input id="fbMediaFilter" class="fb-search" type="search" placeholder="Cerca per nome o località…" aria-label="Cerca un’emittente per nome o località" autocomplete="off" hidden>
+    <div id="fbMediaStatus" class="fb-status" role="status"></div>
+    <ul id="fbMediaList" class="fb-media-list" role="list"></ul>
+    <button id="fbMediaMore" class="btn fb-media-more" type="button" hidden>Mostra altre emittenti</button>
+    <button id="fbMediaRetry" class="fb-retry" type="button" hidden>↻ Riprova</button>
+  </section>
   <div class="fb-footer"><button id="fbBack" class="fb-back">← Torna al globo</button><small>Seleziona un altro Stato<br>dopo aver chiuso la scheda</small></div>
 </section>
+<script src="./media.js"></script>
 <script>
 'use strict';
 let PHYSICAL_B64=null;
@@ -594,7 +628,8 @@ $('hiResBtn').addEventListener('click',()=>{
 
 
 /* SCHEDA FACTBOOK: dati originali CIA (archivio storico) su richiesta, senza valori inventati. */
-const factCache=new Map();let factToken=0;let selectedFactCountry=null;
+const factCache=new Map();let factToken=0;
+const setMediaCountry=createCountryMedia();
 const FBCATS={Introduction:'Introduzione',Geography:'Geografia', 'People and Society':'Popolazione e società',Government:'Governo e istituzioni',Economy:'Economia',Energy:'Energia',Communications:'Comunicazioni',Transportation:'Trasporti','Military and Security':'Difesa e sicurezza',Terrorism:'Terrorismo','Transnational Issues':'Questioni transnazionali',Environment:'Ambiente','Health':'Salute'};
 const CAT_ICONS={Introduction:'◈',Geography:'⛰','People and Society':'♟',Government:'⚖',Economy:'◉',Energy:'⚡',Communications:'◎',Transportation:'✈','Military and Security':'◇',Terrorism:'◌','Transnational Issues':'🌐',Environment:'♻'};
 const FB_KEYS={Capital:'Capitale',Population:'Popolazione',Area:'Superficie','Real GDP (purchasing power parity)':'PIL a parità di potere d’acquisto','GDP (official exchange rate)':'PIL nominale', 'Climate':'Clima','Terrain':'Territorio','Background':'Cenni storici','Location':'Posizione','Independence':'Indipendenza','Languages':'Lingue','Religions':'Religioni','Life expectancy at birth':'Speranza di vita alla nascita','Ethnic groups':'Gruppi etnici','Government type':'Forma di governo','Natural resources':'Risorse naturali','Exports':'Esportazioni','Imports':'Importazioni','Currency':'Valuta','Geographic coordinates':'Coordinate geografiche','Population growth rate':'Crescita demografica'};
@@ -857,7 +892,7 @@ function renderFactbook(data,place,token){
  });
 }
 function hideFactbook(){
- factToken++;$('factbookDrawer').hidden=true;$('factbookBackdrop').hidden=true;
+ factToken++;setMediaCountry(null);$('factbookDrawer').hidden=true;$('factbookBackdrop').hidden=true;
  $('fbBack').blur();document.body.style.overflow='';canvas.focus?.();
 }
 $('selectedCountryBtn').addEventListener('click',()=>{if(selected)openFactbook(selected);});
@@ -883,12 +918,13 @@ async function fetchArchivedFactbook(meta){
 }
 async function openFactbook(country){
  if(!country)return;
- const token=++factToken;selectedFactCountry=country;
+ const token=++factToken;
  $('factbookBackdrop').hidden=false;$('factbookDrawer').hidden=false;
  $('fbCountry').textContent=country[0];$('fbNative').textContent=(country[0]!==country[1]?country[1]+' · ':'')+'Scheda geografica e statistica';
  $('fbScroll').scrollTop=0;$('fbStatus').textContent='Recupero archivio CIA World Factbook…';
  $('fbStats').replaceChildren();$('fbData').replaceChildren();
  const meta=COUNTRY_META[country[1]]||{iso:'',path:''};
+ setMediaCountry(country,meta.iso);
  const flag=$('fbFlag');flag.replaceChildren();
  let emoji='🌐';if(meta.iso?.length===2){emoji=Array.from(meta.iso.toUpperCase()).map(c=>String.fromCodePoint(127397+c.charCodeAt(0))).join('');}
  flag.textContent=emoji;
