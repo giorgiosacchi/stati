@@ -2,10 +2,10 @@
   "id": "./terra-3d-atlante-fisico-v2",
   "name": "Terra 3D - Atlante fisico e CIA World Factbook",
   "short_name": "Terra 3D",
-  "description": "Globo terrestre 3D con cartografia HD, stati, bandiere, schede Factbook CIA e modalità offline",
+  "description": "Globo 3D a schermo intero con mappe fisiche e satellitari, NASA HD opzionale e schede CIA tradotte in italiano",
   "start_url": "./index.html",
   "scope": "./",
-  "display": "standalone",
+  "display": "fullscreen",
   "orientation": "any",
   "background_color": "#07101d",
   "theme_color": "#08101c",
@@ -27,5 +27,9 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
+  ],
+  "display_override": [
+    "fullscreen",
+    "standalone"
   ]
 }
