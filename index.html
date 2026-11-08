@@ -529,7 +529,12 @@ async function upgradeMap(source=NASA_PHYSICAL,requestedUltra=false,silent=false
  hdLoading=true;const button=$('hiResBtn');button.disabled=true;button.textContent='Caricamento NASA…';
  try{
   const response=await fetch(source,{mode:'cors',cache:'force-cache'});if(!response.ok)throw Error('HTTP '+response.status);
-  const blob=await response.blob();let img=await createImageBitmap(blob);
+  // Stesso percorso di caricamento delle texture offline: WebGL ignora UNPACK_FLIP_Y_WEBGL per ImageBitmap.
+  const blob=await response.blob();
+  const objectUrl=URL.createObjectURL(blob),img=new Image();
+  try{
+    await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error('Decodifica cartografia NASA fallita'));img.src=objectUrl;});
+  }finally{URL.revokeObjectURL(objectUrl);}
   let maxTex=gl.getParameter(gl.MAX_TEXTURE_SIZE);
   let desiredWidth=requestedUltra?Math.min(8192,maxTex):Math.min(5400,maxTex);
   if(desiredWidth<1024)throw Error('Scheda grafica non compatibile');
@@ -540,7 +545,7 @@ async function upgradeMap(source=NASA_PHYSICAL,requestedUltra=false,silent=false
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,work);
   if(work.width && (work.width&(work.width-1))===0 && (work.height&(work.height-1))===0){gl.generateMipmap(gl.TEXTURE_2D);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);}
-  img.close?.();hdApplied=true;drawRequested=true;
+  hdApplied=true;drawRequested=true;
   $('resBadge').textContent='NASA Blue Marble · '+work.width+' × '+work.height;
   button.textContent=requestedUltra?'✓ NASA ultra HD':'✓ NASA HD';
   if(!silent)showInstallToast('Mappa NASA ad alta definizione caricata. Puoi ingrandire ulteriormente.');
