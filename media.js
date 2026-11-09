@@ -297,6 +297,79 @@ function youtubeId(url) {
   ? /^https:\/\/www\.youtube-nocookie\.com\/embed\/([\w-]{11})(?:[?#]|$)/.exec(url)?.[1] : undefined;
 }
 
+function createSleepTimer(panel, onExpire) {
+ const form = $('fbTimerForm');
+ const minutes = $('fbTimerMinutes');
+ const state = $('fbTimerState');
+ const remaining = $('fbTimerRemaining');
+ const message = $('fbTimerMessage');
+ let deadline = 0, nextTick;
+
+ function disarm() {
+  deadline = 0;
+  clearTimeout(nextTick);
+  state.hidden = true;
+ }
+
+ function expireIfDue(now = Date.now()) {
+  if (!deadline || now < deadline) return false;
+  disarm();
+  onExpire();
+  return true;
+ }
+
+ function update() {
+  clearTimeout(nextTick);
+  const now = Date.now();
+  if (!deadline || expireIfDue(now)) return;
+  const left = deadline - now;
+  const seconds = Math.ceil(left / 1000);
+  const totalMinutes = Math.floor(seconds / 60);
+  const pad = value => String(value).padStart(2, '0');
+  const time = totalMinutes < 60 ? String(totalMinutes) : Math.floor(totalMinutes / 60) + ':' + pad(totalMinutes % 60);
+  remaining.textContent = time + ':' + pad(seconds % 60);
+  nextTick = setTimeout(update, Math.min(1000, left));
+ }
+
+ function start(value) {
+  const duration = Math.round(value * 60000);
+  const end = Date.now() + duration;
+  if (duration <= 0 || !Number.isSafeInteger(end)) {
+   message.textContent = 'Inserisci una durata valida in minuti, per esempio 45.';
+   return;
+  }
+  deadline = end;
+  message.textContent = '';
+  state.hidden = false;
+  update();
+ }
+
+ for (const preset of panel.querySelectorAll('[data-minutes]')) {
+  preset.addEventListener('click', () => start(Number(preset.dataset.minutes)));
+ }
+ form.addEventListener('submit', event => {
+  event.preventDefault();
+  const value = minutes.value.trim().replace(',', '.');
+  start(/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(value) ? Number(value) : NaN);
+ });
+ $('fbTimerCancel').addEventListener('click', () => {
+  disarm();
+  message.textContent = 'Timer disattivato.';
+  minutes.focus({preventScroll:true});
+ });
+ document.addEventListener('visibilitychange', update);
+ window.addEventListener('pageshow', update);
+
+ return {
+  expireIfDue,
+  reset() {
+   disarm();
+   minutes.value = '';
+   message.textContent = '';
+  }
+ };
+}
+
 function createCountryPlayer(panel, link) {
  const directory = $('fbMediaDirectory');
  const player = $('fbPlayer');
@@ -306,8 +379,18 @@ function createCountryPlayer(panel, link) {
  const status = $('fbPlayerStatus');
  const links = $('fbPlayerLinks');
  const retry = $('fbPlayerRetry');
+ const timerPanel = $('fbPlayerTimer');
  let opener, directoryScroll, hlsScript;
  let stopStream = () => {};
+ const sleepTimer = createSleepTimer(timerPanel, () => {
+  const focusedTimer = timerPanel.contains(document.activeElement);
+  stopPlayback();
+  timerPanel.hidden = true;
+  status.textContent = 'Riproduzione terminata allo scadere del timer.';
+  retry.textContent = 'Riproduci di nuovo';
+  retry.hidden = false;
+  if (focusedTimer) retry.focus({preventScroll:true});
+ });
 
  function loadHls() {
   if (!hlsScript) {
@@ -335,11 +418,16 @@ function createCountryPlayer(panel, link) {
   return hlsScript;
  }
 
- function close(restoreFocus = false) {
-  if (player.hidden) return;
+ function stopPlayback() {
   stopStream();
   stopStream = () => {};
   viewport.replaceChildren();
+ }
+
+ function close(restoreFocus = false) {
+  if (player.hidden) return;
+  sleepTimer.reset();
+  stopPlayback();
   links.replaceChildren();
   retry.onclick = null;
   player.hidden = true;
@@ -383,7 +471,10 @@ function createCountryPlayer(panel, link) {
 
   const options = [...row.streams, ...(row.youtube || []).map(id => ({id}))];
   function trySource(index) {
+   if (sleepTimer.expireIfDue()) return;
+   timerPanel.hidden = false;
    retry.hidden = true;
+   retry.textContent = '↻ Riprova';
    viewport.replaceChildren();
    const source = options[index];
    if (!source) {
@@ -433,16 +524,17 @@ function createCountryPlayer(panel, link) {
    };
    const timer = setTimeout(fail, 18000);
    const play = () => {
-    if (!cancelled) media.play().catch(() => {});
+    if (!cancelled && !sleepTimer.expireIfDue()) media.play().catch(() => {});
    };
    media.addEventListener('error', fail);
+   media.addEventListener('timeupdate', () => { if (!cancelled) sleepTimer.expireIfDue(); });
    media.addEventListener('canplay', () => {
-    if (cancelled) return;
+    if (cancelled || sleepTimer.expireIfDue()) return;
     clearTimeout(timer);
     if (media.paused) status.textContent = 'Premi Riproduci per avviare la diretta.';
    });
    media.addEventListener('playing', () => {
-    if (cancelled) return;
+    if (cancelled || sleepTimer.expireIfDue()) return;
     clearTimeout(timer);
     status.textContent = 'In diretta';
    });
@@ -452,7 +544,7 @@ function createCountryPlayer(panel, link) {
     return;
    }
    loadHls().then(Hls => {
-    if (cancelled) return;
+    if (cancelled || sleepTimer.expireIfDue()) return;
     if (!Hls.isSupported()) return fail();
     hls = new Hls({capLevelToPlayerSize:!isRadio});
     hls.on(Hls.Events.MEDIA_ATTACHED, play);
