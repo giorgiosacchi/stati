@@ -53,6 +53,10 @@ function createCountryMedia() {
  const famelack = 'https://famelack.com';
  const famelackCatalogue = 'https://github.com/famelack/famelack-data';
  const famelackData = 'https://raw.githubusercontent.com/famelack/famelack-data/main/';
+ const iptvOrgCatalogue = 'https://github.com/iptv-org/iptv';
+ const iptvOrgCountryBase = 'https://iptv-org.github.io/iptv/countries/';
+ const freeTVCatalogue = 'https://github.com/Free-TV/IPTV';
+ const freeTVItalyPlaylist = 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_italy.m3u8';
  const locationsSource = 'https://github.com/iptv-org/database/blob/6321df850d653f192ca61f9d521e5f6bb0c9a320/data/channels.csv';
  const italianTvSites = new Map([
   ['rai 1','https://www.raiplay.it/dirette/rai1'],
@@ -101,7 +105,7 @@ function createCountryMedia() {
    favorites.set(key,{key,kind,name:row.name,place:row.place||'',
     countryCode:row.countryCode||country?.code||'',countryName:row.countryName||country?.name||'',
     language:row.language||'',href:row.href||'',official:row.official||'',
-    streams:(row.streams||[]).slice(0,8),youtube:(row.youtube||[]).slice(0,8)});
+    streams:(row.streams||[]).slice(0,16),youtube:(row.youtube||[]).slice(0,8),sources:row.sources||[]});
   }
   try{localStorage.setItem(MEDIA_FAVORITES_KEY,JSON.stringify([...favorites.values()]));}
   catch{status.textContent='Impossibile salvare i preferiti nel dispositivo.';}
@@ -189,6 +193,99 @@ function createCountryMedia() {
   return [...unique.values()];
  }
 
+
+ // IPTV-org e Free-TV: una playlist per il solo Paese richiesto, senza scaricare il mondo intero.
+ function parseTVPlaylist(text, origin) {
+  if (!text.trimStart().startsWith('#EXTM3U')) throw Error('Playlist M3U non valida');
+  const rows = [];
+  let pending = null;
+  for (const raw of text.split(/\r?\n/)) {
+   const line = raw.trim();
+   if (line.startsWith('#EXTINF:')) {
+    const attr = key => {
+     const found = new RegExp('(?:^|\\s)' + key + '="([^"]*)"', 'i').exec(line);
+     return found ? found[1].trim() : '';
+    };
+    const comma = line.lastIndexOf(',');
+    const name = (attr('tvg-name') || (comma >= 0 ? line.slice(comma + 1) : ''))
+     .replace(/\s*[ⒼⓉⓎ]\s*$/u, '').trim();
+    pending = name ? {
+     name, place:'', language:mediaLanguage(attr('tvg-language')),
+     tvgId:attr('tvg-id'), streams:[],youtube:[],sources:[origin]
+    } : null;
+   } else if (line && !line.startsWith('#') && pending) {
+    const stream = streamSource(line);
+    // Evita siti HTML, flussi HTTP bloccati dai browser e formati non supportati.
+    if (stream && (stream.hls || /\.(?:mp4|webm)(?:[?#]|$)/i.test(stream.url))) {
+     pending.streams = [stream];
+     rows.push(pending);
+    }
+    pending = null;
+   }
+  }
+  return rows;
+ }
+
+ function fetchTVPlaylist(url, origin) {
+  return cached('tv-playlist:' + url, async () => {
+   const response = await fetch(url, {signal:AbortSignal.timeout(14000), cache:'no-cache'});
+   if (response.status === 404) return [];
+   if (!response.ok) throw Error('Playlist non raggiungibile: HTTP ' + response.status);
+   const text = await response.text();
+   if (text.length > 4000000) throw Error('Playlist troppo grande');
+   return parseTVPlaylist(text, origin);
+  });
+ }
+
+ function tvKey(name) {
+  let key = String(name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+   .toLocaleLowerCase().replace(/\s*[ⒼⓉⓎ]\s*$/u, '')
+   .replace(/[^\p{L}\p{N}]/gu, '');
+  // Due nomi commerciali diversi per la medesima emittente genovese.
+  if (key === 'telenordgenova' || key === 'telenordtv') key = 'telenord';
+  if (key === 'teleliguriasudtls') key = 'teleliguriasud';
+  return key;
+ }
+
+ function mergeTVEntries(collections) {
+  const rows = [], byName = new Map(), byStream = new Map();
+  for (const group of collections) for (const incoming of group) {
+   if (!incoming || !incoming.name) continue;
+   const nameKey = tvKey(incoming.name);
+   const streams = Array.isArray(incoming.streams) ? incoming.streams : [];
+   const matched = streams.map(stream => byStream.get(stream.url)).find(Boolean)
+    || (nameKey ? byName.get(nameKey) : null);
+   let row;
+   if (matched) {
+    row = matched;
+    row.streams = mergeStreams(row.streams, streams).slice(0, 16);
+    row.youtube = [...new Set([...(row.youtube || []), ...(incoming.youtube || [])])];
+    row.sources = [...new Set([...(row.sources || []), ...(incoming.sources || [])])];
+    if (!row.place && incoming.place) row.place = incoming.place;
+    if (!row.language && incoming.language) row.language = incoming.language;
+    if (!row.official && incoming.official) row.official = incoming.official;
+    if (!row.href && incoming.href) row.href = incoming.href;
+   } else {
+    row = {...incoming, streams:mergeStreams([], streams).slice(0,16),
+     youtube:[...(incoming.youtube || [])],sources:[...(incoming.sources || [])]};
+    rows.push(row);
+   }
+   if (nameKey) byName.set(nameKey,row);
+   for (const stream of row.streams) byStream.set(stream.url,row);
+  }
+  return rows;
+ }
+
+ const ligurianTV = [
+  {name:'Telenord',place:'Genova',language:'Italiano',official:'https://telenord.it',
+   streams:[streamSource('https://64b16f23efbee.streamlock.net/telenord/telenord/playlist.m3u8')]},
+  {name:'TeleGenova',place:'Genova',language:'Italiano',official:'https://www.telegenova.com/',
+   streams:[streamSource('https://64b16f23efbee.streamlock.net/telegenova/telegenova/playlist.m3u8')]},
+  {name:'Primocanale',place:'Genova',language:'Italiano',official:'https://www.primocanale.it/diretta.html',streams:[]},
+  {name:'Entella TV',place:'Lavagna',language:'Italiano',streams:[]},
+  {name:'Tele Liguria Sud',place:'La Spezia',language:'Italiano',streams:[]}
+ ].map(row => ({...row,streams:row.streams.filter(Boolean),youtube:[],sources:['Emittenti liguri']}));
+
  async function loadRadios(code) {
   const [browser, catalogue] = await Promise.allSettled([
    cached('radio:' + code, () => browserRadios(code)),
@@ -233,23 +330,28 @@ function createCountryMedia() {
 
  async function loadTV(code) {
   const slug = countrySlug(code);
-  const path = '/tv/' + slug;
-  const [catalogue, locations] = await Promise.allSettled([
+  const [catalogue, locations, iptvOrg, freeTV] = await Promise.allSettled([
    fetchFamelack('tv', slug),
-   cached('tv-locations', () => fetchJSON('./data/tv-localita.json'))
+   cached('tv-locations', () => fetchJSON('./data/tv-localita.json')),
+   fetchTVPlaylist(iptvOrgCountryBase + code.toLowerCase() + '.m3u', 'IPTV-org'),
+   code === 'IT' ? fetchTVPlaylist(freeTVItalyPlaylist, 'Free-TV') : Promise.resolve([])
   ]);
-  if (!Array.isArray(catalogue.value)) return {rows:[], partial:true};
-  const rows = catalogue.value.filter(channel => channel.name && typeof channel.nanoid === 'string'
-   && /^[A-Za-z0-9_-]+$/.test(channel.nanoid))
+  const previous = Array.isArray(catalogue.value) ? catalogue.value.filter(channel =>
+   channel.name && typeof channel.nanoid === 'string' && /^[A-Za-z0-9_-]+$/.test(channel.nanoid))
    .map(channel => ({
-    name:channel.name, place:channel.city || locations.value?.places?.[channel.nanoid],
+    name:channel.name,place:channel.city || locations.value?.places?.[channel.nanoid],
     language:mediaLanguage(channel.languagecodes||channel.languages||channel.language||channel.lang),
-    href:famelack + path + '/' + channel.nanoid,
+    href:famelack + '/tv/' + slug + '/' + channel.nanoid,
     official:code === 'IT' ? italianTvSites.get(normalize(channel.name)) : undefined,
     streams:catalogueStreams(channel).filter(stream => stream.hls),
-    youtube:Array.isArray(channel.sources?.youtube) ? channel.sources.youtube.map(youtubeId).filter(Boolean) : []
-   }));
-  return {rows, partial:false};
+    youtube:Array.isArray(channel.sources?.youtube) ? channel.sources.youtube.map(youtubeId).filter(Boolean) : [],
+    sources:['Famelack']
+   })) : [];
+  const rows = mergeTVEntries([
+   previous, iptvOrg.value || [], freeTV.value || [], code === 'IT' ? ligurianTV : []
+  ]);
+  return {rows,partial:catalogue.status==='rejected'||iptvOrg.status==='rejected'
+   ||(code==='IT'&&freeTV.status==='rejected')};
  }
 
  function link(label, href) {
@@ -267,8 +369,10 @@ function createCountryMedia() {
   }else if(type==='radio'){
    sources.textContent='Cataloghi Radio Browser e Famelack. La lingua è indicata quando fornita dalla fonte.';
   }else{
-   sources.replaceChildren('Fonte ', link('Catalogo TV Garden (Famelack)', famelackCatalogue),
-    '. Località da ', link('IPTV-org', locationsSource), ' quando disponibili.');
+   sources.replaceChildren('Cataloghi ', link('Famelack', famelackCatalogue),
+    ', ', link('IPTV-org', iptvOrgCatalogue),
+    ...(country?.code === 'IT' ? [', ', link('Free-TV Italia', freeTVCatalogue), ' e selezione di emittenti liguri'] : []),
+    '. Località integrate da ', link('IPTV-org', locationsSource), '.');
   }
  }
 
@@ -305,7 +409,13 @@ function createCountryMedia() {
    const location = document.createElement('small');
    const origin=activeType==='favorites' ? row.countryName||row.countryCode : '';
    const where=row.place?(italianPlaces[row.place]||row.place):'Località non indicata';
-   location.textContent=[origin,where,row.language?'Lingua: '+row.language:''].filter(Boolean).join(' · ');
+   const mediaKind=row.kind||activeType;
+   const streamInfo = mediaKind==='tv'
+    ? (row.streams?.length ? 'Collegamenti stream: '+row.streams.length
+     : row.youtube?.length ? 'Diretta YouTube' : 'Solo link esterno') : '';
+   const sourceInfo=mediaKind==='tv'&&row.sources?.length?'Fonti: '+row.sources.join(', '):'';
+   location.textContent=[origin,where,row.language?'Lingua: '+row.language:'',streamInfo,sourceInfo]
+    .filter(Boolean).join(' · ');
    info.append(name,location);
    const actions=document.createElement('div');actions.className='fb-media-actions';
    const fav=document.createElement('button');fav.type='button';fav.className='btn fb-media-star';
@@ -602,7 +712,7 @@ function createCountryPlayer(panel, link, favoritesAPI) {
    if (row.youtube.length) addLink('Apri su YouTube', 'https://www.youtube.com/watch?v=' + row.youtube[0]);
    if (!links.childElementCount) {
     if (row.streams.length) addLink('Link al flusso HLS', row.streams[0].url);
-    else addLink('Pagina del canale su Famelack', row.href);
+    else if (row.href) addLink('Pagina del canale su Famelack', row.href);
    }
    links.hidden = !row.official && !row.youtube.length;
   }
