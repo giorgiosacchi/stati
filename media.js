@@ -469,7 +469,7 @@ function createSleepTimer(panel, onExpire) {
  };
 }
 
-function createCountryPlayer(panel, link) {
+function createCountryPlayer(panel, link, favoritesAPI) {
  const directory = $('fbMediaDirectory');
  const player = $('fbPlayer');
  const title = $('fbPlayerTitle');
@@ -478,8 +478,45 @@ function createCountryPlayer(panel, link) {
  const status = $('fbPlayerStatus');
  const links = $('fbPlayerLinks');
  const retry = $('fbPlayerRetry');
- const timerPanel = $('fbPlayerTimer');
- let opener, directoryScroll, hlsScript;
+ const timerPanel=$('fbPlayerTimer');
+ const volumeSlider=$('fbVolumeSlider'),volumeText=$('fbVolumeValue'),muteButton=$('fbPlayerMute');
+ const favoriteButton=$('fbPlayerFavorite'),languageLabel=$('fbPlayerLanguage');
+ let opener,directoryScroll,hlsScript,currentRow,currentMedia=null,currentFrame=null,volume=80,muted=false;
+ try{
+  const saved=localStorage.getItem(MEDIA_VOLUME_KEY),number=Number(saved);
+  if(saved!==null&&Number.isFinite(number)&&number>=0&&number<=100)volume=number;
+ }catch{}
+ function applyVolume(){
+  volumeSlider.value=String(volume);volumeText.textContent=volume+'%';
+  const effective=muted?0:volume;
+  muteButton.textContent=effective===0?'🔇':effective<45?'🔉':'🔊';
+  muteButton.setAttribute('aria-pressed',String(effective===0));
+  muteButton.setAttribute('aria-label',effective===0?'Riattiva audio':'Disattiva audio');
+  if(currentMedia){currentMedia.volume=volume/100;currentMedia.muted=effective===0;}
+  if(currentFrame?.contentWindow){
+   const command=(func,args)=>currentFrame.contentWindow.postMessage(JSON.stringify({event:'command',func,args}),'*');
+   command('setVolume',[effective]);command(effective===0?'mute':'unMute',[]);
+  }
+ }
+ volumeSlider.value=String(volume);applyVolume();
+ volumeSlider.addEventListener('input',()=>{
+  volume=Number(volumeSlider.value);muted=false;
+  try{localStorage.setItem(MEDIA_VOLUME_KEY,String(volume));}catch{}
+  applyVolume();
+ });
+ muteButton.addEventListener('click',()=>{
+  if(volume===0){volume=50;muted=false;}
+  else muted=!muted;
+  applyVolume();
+ });
+ function refreshFavorite(){
+  if(!currentRow)return;
+  const saved=favoritesAPI.isFavorite(currentRow);
+  favoriteButton.setAttribute('aria-pressed',String(saved));
+  favoriteButton.textContent=saved?'★ Rimuovi dai preferiti':'☆ Aggiungi ai preferiti';
+  favoriteButton.setAttribute('aria-label',(saved?'Rimuovi dai':'Aggiungi ai')+' preferiti: '+currentRow.name);
+ }
+ favoriteButton.addEventListener('click',()=>{if(currentRow)favoritesAPI.toggleFavorite(currentRow);});
  let stopStream = () => {};
  const sleepTimer = createSleepTimer(timerPanel, () => {
   const focusedTimer = timerPanel.contains(document.activeElement);
@@ -517,9 +554,9 @@ function createCountryPlayer(panel, link) {
   return hlsScript;
  }
 
- function stopPlayback() {
-  stopStream();
-  stopStream = () => {};
+ function stopPlayback(){
+  stopStream();stopStream=()=>{};
+  currentMedia=null;currentFrame=null;
   viewport.replaceChildren();
  }
 
@@ -536,12 +573,14 @@ function createCountryPlayer(panel, link) {
    panel.scrollTop = directoryScroll;
    opener?.focus({preventScroll:true});
   }
-  opener = null;
+  opener=null;currentRow=null;
  }
 
  function open(row, button, type) {
   close();
   const isRadio = type === 'radio';
+  currentRow=row;refreshFavorite();
+  languageLabel.textContent=row.language?'Lingua: '+row.language:'';
   opener = button;
   directoryScroll = panel.scrollTop;
   directory.hidden = true;
@@ -575,6 +614,7 @@ function createCountryPlayer(panel, link) {
    retry.hidden = true;
    retry.textContent = '↻ Riprova';
    viewport.replaceChildren();
+   currentMedia=null;currentFrame=null;
    const source = options[index];
    if (!source) {
     if (isRadio) {
@@ -589,12 +629,15 @@ function createCountryPlayer(panel, link) {
    if (source.id) {
     const frame = document.createElement('iframe');
     frame.title = 'Diretta di ' + row.name;
-    frame.src = 'https://www.youtube-nocookie.com/embed/' + source.id + '?autoplay=1&playsinline=1';
+    frame.src='https://www.youtube-nocookie.com/embed/'+source.id+
+     '?autoplay=1&playsinline=1&enablejsapi=1&origin='+encodeURIComponent(location.origin);
     frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
     frame.allowFullscreen = true;
     frame.referrerPolicy = 'strict-origin-when-cross-origin';
-    viewport.append(frame);
-    status.textContent = 'Diretta YouTube';
+    currentFrame=frame;
+    frame.addEventListener('load',()=>{applyVolume();setTimeout(()=>{if(currentFrame===frame)applyVolume();},700);});
+    viewport.append(frame);applyVolume();
+    status.textContent='Diretta YouTube. Il controllo volume dipende anche dal lettore YouTube.';
     return;
    }
 
@@ -603,7 +646,7 @@ function createCountryPlayer(panel, link) {
    if (!isRadio) media.setAttribute('playsinline', '');
    media.preload = 'auto';
    media.setAttribute('aria-label', 'Diretta di ' + row.name);
-   viewport.append(media);
+   currentMedia=media;viewport.append(media);applyVolume();
    status.textContent = 'Caricamento della diretta…';
    let cancelled = false, hls;
    const stop = () => {
@@ -657,5 +700,5 @@ function createCountryPlayer(panel, link) {
  }
 
  back.addEventListener('click', () => close(true));
- return {open, close};
+ return {open,close,refreshFavorite};
 }
