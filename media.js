@@ -1,11 +1,9 @@
 'use strict';
 
 function createCountryMedia() {
- const radioGarden = 'https://radio.garden';
- const radioBrowser = 'https://www.radio-browser.info/';
  const famelack = 'https://famelack.com';
  const famelackCatalogue = 'https://github.com/famelack/famelack-data';
- const famelackData = 'https://raw.githubusercontent.com/famelack/famelack-data/main/tv/raw/countries/';
+ const famelackData = 'https://raw.githubusercontent.com/famelack/famelack-data/main/';
  const locationsSource = 'https://github.com/iptv-org/database/blob/6321df850d653f192ca61f9d521e5f6bb0c9a320/data/channels.csv';
  const italianTvSites = new Map([
   ['rai 1','https://www.raiplay.it/dirette/rai1'],
@@ -39,7 +37,7 @@ function createCountryMedia() {
  const more = $('fbMediaMore');
  const retry = $('fbMediaRetry');
  const requests = new Map();
- const tvPlayer = createTVPlayer(panel, link);
+ const player = createCountryPlayer(panel, link);
  let country, activeType, revision = 0;
  let entries = [], visible = batchSize, partial = false;
 
@@ -80,47 +78,85 @@ function createCountryMedia() {
   throw Error('Radio Browser non raggiungibile');
  }
 
- function streamLink(value) {
+ const countrySlug = code => code === 'GB' ? 'uk' : code.toLowerCase();
+
+ function fetchFamelack(kind, slug) {
+  return cached('famelack:' + kind + ':' + slug, async () => {
+   const rows = await fetchJSON(famelackData + kind + '/raw/countries/' + slug + '.json', true);
+   if (!Array.isArray(rows)) throw Error('Catalogo non valido');
+   return rows;
+  });
+ }
+
+ function streamSource(value, hls = false) {
   try {
    const url = new URL(value);
-   if (['https:', 'http:'].includes(url.protocol) && !url.username && !url.password) return url.href;
+   if (url.protocol === 'https:' && !url.username && !url.password &&
+    !/\.(m3u|pls|asx|xspf|mpd)$/i.test(url.pathname)) {
+    return {url:url.href, hls:hls || /\.m3u8(?:[?#]|$)/i.test(url.href)};
+   }
   } catch {}
-  return '';
+  return null;
+ }
+
+ function catalogueStreams(channel) {
+  const streams = channel.sources?.streams;
+  return Array.isArray(streams) ? streams.map(url => streamSource(url)).filter(Boolean) : [];
+ }
+
+ function mergeStreams(first, second) {
+  const unique = new Map();
+  for (const stream of [...first, ...second]) {
+   if (!stream) continue;
+   const prior = unique.get(stream.url);
+   if (!prior || stream.hls) unique.set(stream.url, stream);
+  }
+  return [...unique.values()];
  }
 
  async function loadRadios(code) {
-  const [garden, browser] = await Promise.allSettled([
-   cached('garden', () => fetchJSON('./data/radio-garden.json')),
-   cached('radio:' + code, () => browserRadios(code))
+  const [browser, catalogue] = await Promise.allSettled([
+   cached('radio:' + code, () => browserRadios(code)),
+   fetchFamelack('radio', countrySlug(code))
   ]);
-  const primary = garden.value?.[code];
-  const rows = (primary?.stations || []).map(([name, place, path]) => ({
-   name, place, href:radioGarden + path, preferred:true
-  }));
-  const primaryNames = new Set(rows.map(row => normalize(row.name)));
-  const stations = new Set();
-  const urls = new Set();
+  const stations = new Map();
+  function byPlace(name) {
+   const key = normalize(name);
+   if (!stations.has(key)) stations.set(key, new Map());
+   return stations.get(key);
+  }
   for (const station of browser.value || []) {
    const name = station.name?.trim();
-   const place = station.state?.trim();
-   const original = streamLink(station.url);
-   const href = original.startsWith('https:') ? original : streamLink(station.url_resolved) || original;
-   if (!name || !href || primaryNames.has(normalize(name))) continue;
-   const key = normalize(name) + '\n' + normalize(place || '');
-   const url = original || href;
-   if (stations.has(key) || urls.has(url)) continue;
-   stations.add(key);
-   urls.add(url);
-   rows.push({name, place, href});
+   if (!name) continue;
+   const place = station.state?.trim() || '';
+   const key = normalize(italianPlaces[place] || place);
+   const group = byPlace(name);
+   const row = group.get(key) || {name, place, streams:[]};
+   const hls = Number(station.hls) === 1;
+   row.streams = mergeStreams(row.streams, [streamSource(station.url, hls), streamSource(station.url_resolved, hls)]);
+   group.set(key, row);
   }
-  return {rows, path:primary?.path, partial:garden.status === 'rejected' || browser.status === 'rejected'};
+  for (const station of catalogue.value || []) {
+   const name = station.name?.trim();
+   const streams = catalogueStreams(station);
+   if (!name || !streams.length) continue;
+   const group = byPlace(name);
+   const candidates = [...group.values()];
+   // Collega i cataloghi tramite lo stesso flusso, oppure tramite un nome univoco nel Paese.
+   const matched = candidates.find(row => row.streams.some(known => streams.some(stream => stream.url === known.url)))
+    || (candidates.length === 1 ? candidates[0] : group.get(''));
+   if (matched) matched.streams = mergeStreams(streams, matched.streams);
+   else group.set('', {name, place:station.city, streams});
+  }
+  const rows = [...stations.values()].flatMap(group => [...group.values()]).filter(row => row.streams.length);
+  return {rows, partial:browser.status === 'rejected' || catalogue.status === 'rejected'};
  }
 
  async function loadTV(code) {
-  const slug = (code === 'GB' ? 'UK' : code).toLowerCase();
+  const slug = countrySlug(code);
   const path = '/tv/' + slug;
   const [catalogue, locations] = await Promise.allSettled([
-   cached('tv:' + code, () => fetchJSON(famelackData + slug + '.json', true)),
+   fetchFamelack('tv', slug),
    cached('tv-locations', () => fetchJSON('./data/tv-localita.json'))
   ]);
   if (!Array.isArray(catalogue.value)) return {rows:[], partial:true};
@@ -130,8 +166,7 @@ function createCountryMedia() {
     name:channel.name, place:channel.city || locations.value?.places?.[channel.nanoid],
     href:famelack + path + '/' + channel.nanoid,
     official:code === 'IT' ? italianTvSites.get(normalize(channel.name)) : undefined,
-    streams:Array.isArray(channel.sources?.streams) ? channel.sources.streams.map(streamLink)
-     .filter(url => url.startsWith('https://') && /\.m3u8(?:[?#]|$)/i.test(url)) : [],
+    streams:catalogueStreams(channel).filter(stream => stream.hls),
     youtube:Array.isArray(channel.sources?.youtube) ? channel.sources.youtube.map(youtubeId).filter(Boolean) : []
    }));
   return {rows, partial:false};
@@ -146,10 +181,9 @@ function createCountryMedia() {
   return anchor;
  }
 
- function setSources(type, path) {
+ function setSources(type) {
   if (type === 'radio') {
-   sources.replaceChildren('Fonti ', link('Radio Garden', radioGarden + (path || '/search')),
-    ' e ', link('Radio Browser', radioBrowser), '.');
+   sources.textContent = 'Cataloghi Radio Browser e Famelack.';
   } else {
    sources.replaceChildren('Fonte ', link('Catalogo TV Garden (Famelack)', famelackCatalogue),
     '. Località da ', link('IPTV-org', locationsSource), ' quando disponibili.');
@@ -157,17 +191,14 @@ function createCountryMedia() {
  }
 
  function rowAction(row) {
-  if (activeType === 'radio') {
-   const anchor = link('Ascolta ↗', row.href);
-   anchor.setAttribute('aria-label', 'Ascolta ' + row.name + ' (si apre in un’altra scheda)');
-   return anchor;
-  }
-  const watch = document.createElement('button');
-  watch.type = 'button';
-  watch.textContent = 'Guarda';
-  watch.setAttribute('aria-label', 'Guarda ' + row.name);
-  watch.addEventListener('click', () => tvPlayer.open(row, watch));
-  return watch;
+  const type = activeType;
+  const label = type === 'radio' ? 'Ascolta' : 'Guarda';
+  const action = document.createElement('button');
+  action.type = 'button';
+  action.textContent = label;
+  action.setAttribute('aria-label', label + ' ' + row.name);
+  action.addEventListener('click', () => player.open(row, action, type));
+  return action;
  }
 
  function render(append = false) {
@@ -203,7 +234,7 @@ function createCountryMedia() {
  }
 
  function setView(type) {
-  tvPlayer.close();
+  player.close();
   activeType = type;
   for (const button of buttons) button.setAttribute('aria-pressed', String(button.dataset.media === type));
   panel.hidden = !type;
@@ -232,11 +263,9 @@ function createCountryMedia() {
   status.textContent = 'Caricamento delle emittenti…';
   const result = code ? await (type === 'radio' ? loadRadios(code) : loadTV(code)) : {rows:[]};
   if (request !== revision) return;
-  setSources(type, result.path);
   entries = result.rows.map(row => ({
    ...row, search:normalize([row.name, row.place, italianPlaces[row.place]].filter(Boolean).join(' '))
-  })).sort((a, b) => Number(!!b.preferred) - Number(!!a.preferred) ||
-   sort.compare(a.name, b.name) || sort.compare(a.place || '', b.place || ''));
+  })).sort((a, b) => sort.compare(a.name, b.name) || sort.compare(a.place || '', b.place || ''));
   partial = result.partial;
   visible = batchSize;
   filter.hidden = !entries.length;
@@ -268,14 +297,15 @@ function youtubeId(url) {
   ? /^https:\/\/www\.youtube-nocookie\.com\/embed\/([\w-]{11})(?:[?#]|$)/.exec(url)?.[1] : undefined;
 }
 
-function createTVPlayer(panel, link) {
+function createCountryPlayer(panel, link) {
  const directory = $('fbMediaDirectory');
- const player = $('fbTvPlayer');
- const title = $('fbTvTitle');
- const back = $('fbTvBack');
- const viewport = $('fbTvViewport');
- const status = $('fbTvStatus');
- const links = $('fbTvLinks');
+ const player = $('fbPlayer');
+ const title = $('fbPlayerTitle');
+ const back = $('fbPlayerBack');
+ const viewport = $('fbPlayerViewport');
+ const status = $('fbPlayerStatus');
+ const links = $('fbPlayerLinks');
+ const retry = $('fbPlayerRetry');
  let opener, directoryScroll, hlsScript;
  let stopStream = () => {};
 
@@ -311,6 +341,7 @@ function createTVPlayer(panel, link) {
   stopStream = () => {};
   viewport.replaceChildren();
   links.replaceChildren();
+  retry.onclick = null;
   player.hidden = true;
   directory.hidden = false;
   panel.setAttribute('aria-labelledby', 'fbMediaTitle');
@@ -321,14 +352,16 @@ function createTVPlayer(panel, link) {
   opener = null;
  }
 
- function open(row, button) {
+ function open(row, button, type) {
   close();
+  const isRadio = type === 'radio';
   opener = button;
   directoryScroll = panel.scrollTop;
   directory.hidden = true;
   title.textContent = row.name;
+  back.textContent = isRadio ? '← Elenco radio' : '← Elenco TV';
   player.hidden = false;
-  panel.setAttribute('aria-labelledby', 'fbTvTitle');
+  panel.setAttribute('aria-labelledby', 'fbPlayerTitle');
   panel.scrollTop = 0;
   back.focus({preventScroll:true});
 
@@ -337,21 +370,30 @@ function createTVPlayer(panel, link) {
    anchor.className = 'btn';
    links.append(anchor);
   }
-  if (row.official) addLink('Diretta sul sito dell’emittente', row.official);
-  if (row.youtube.length) addLink('Apri su YouTube', 'https://www.youtube.com/watch?v=' + row.youtube[0]);
-  if (!links.childElementCount) {
-   if (row.streams.length) addLink('Link al flusso HLS', row.streams[0]);
-   else addLink('Pagina del canale su Famelack', row.href);
+  links.hidden = true;
+  if (!isRadio) {
+   if (row.official) addLink('Diretta sul sito dell’emittente', row.official);
+   if (row.youtube.length) addLink('Apri su YouTube', 'https://www.youtube.com/watch?v=' + row.youtube[0]);
+   if (!links.childElementCount) {
+    if (row.streams.length) addLink('Link al flusso HLS', row.streams[0].url);
+    else addLink('Pagina del canale su Famelack', row.href);
+   }
+   links.hidden = !row.official && !row.youtube.length;
   }
-  links.hidden = !row.official && !row.youtube.length;
 
-  const options = [...row.streams.map(url => ({url})), ...row.youtube.map(id => ({id}))];
+  const options = [...row.streams, ...(row.youtube || []).map(id => ({id}))];
   function trySource(index) {
+   retry.hidden = true;
    viewport.replaceChildren();
    const source = options[index];
    if (!source) {
-    links.hidden = false;
-    status.textContent = 'Diretta non disponibile nel lettore. Puoi aprire il collegamento qui sotto.';
+    if (isRadio) {
+     status.textContent = 'Diretta radio momentaneamente non disponibile.';
+     retry.hidden = false;
+    } else {
+     links.hidden = false;
+     status.textContent = 'Diretta non disponibile nel lettore. Puoi aprire il collegamento qui sotto.';
+    }
     return;
    }
    if (source.id) {
@@ -366,21 +408,21 @@ function createTVPlayer(panel, link) {
     return;
    }
 
-   const video = document.createElement('video');
-   video.controls = true;
-   video.setAttribute('playsinline', '');
-   video.preload = 'auto';
-   video.setAttribute('aria-label', 'Diretta di ' + row.name);
-   viewport.append(video);
+   const media = document.createElement(isRadio ? 'audio' : 'video');
+   media.controls = true;
+   if (!isRadio) media.setAttribute('playsinline', '');
+   media.preload = 'auto';
+   media.setAttribute('aria-label', 'Diretta di ' + row.name);
+   viewport.append(media);
    status.textContent = 'Caricamento della diretta…';
    let cancelled = false, hls;
    const stop = () => {
     cancelled = true;
     clearTimeout(timer);
     hls?.destroy();
-    video.pause();
-    video.removeAttribute('src');
-    video.load();
+    media.pause();
+    media.removeAttribute('src');
+    media.load();
    };
    stopStream = stop;
    const fail = () => {
@@ -391,34 +433,35 @@ function createTVPlayer(panel, link) {
    };
    const timer = setTimeout(fail, 18000);
    const play = () => {
-    if (!cancelled) video.play().catch(() => {});
+    if (!cancelled) media.play().catch(() => {});
    };
-   video.addEventListener('error', fail);
-   video.addEventListener('canplay', () => {
+   media.addEventListener('error', fail);
+   media.addEventListener('canplay', () => {
     if (cancelled) return;
     clearTimeout(timer);
-    if (video.paused) status.textContent = 'Premi Riproduci per avviare la diretta.';
+    if (media.paused) status.textContent = 'Premi Riproduci per avviare la diretta.';
    });
-   video.addEventListener('playing', () => {
+   media.addEventListener('playing', () => {
     if (cancelled) return;
     clearTimeout(timer);
     status.textContent = 'In diretta';
    });
-   if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = source.url;
+   if (!source.hls || media.canPlayType('application/vnd.apple.mpegurl')) {
+    media.src = source.url;
     play();
     return;
    }
    loadHls().then(Hls => {
     if (cancelled) return;
     if (!Hls.isSupported()) return fail();
-    hls = new Hls({capLevelToPlayerSize:true});
+    hls = new Hls({capLevelToPlayerSize:!isRadio});
     hls.on(Hls.Events.MEDIA_ATTACHED, play);
     hls.on(Hls.Events.ERROR, (_event, details) => { if (details.fatal) fail(); });
     hls.loadSource(source.url);
-    hls.attachMedia(video);
+    hls.attachMedia(media);
    }).catch(fail);
   }
+  retry.onclick = () => trySource(0);
   trySource(0);
  }
 

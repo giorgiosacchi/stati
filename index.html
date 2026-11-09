@@ -144,11 +144,12 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
 .fb-media-row small{margin-top:3px;color:#a7c6d9;font-size:12px}
 .fb-media-row .btn{flex:none;font-size:12px;min-height:44px;color:#a9efff;text-decoration:none}
 .fb-media-more{margin-top:12px}
-.fb-tv-player h3{margin:14px 0 12px;font-size:20px;overflow-wrap:anywhere}
-.fb-tv-viewport:not(:empty){margin-bottom:12px}
-.fb-tv-viewport video,.fb-tv-viewport iframe{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;border:0;border-radius:12px;background:#000}
-.fb-tv-links{display:flex;flex-wrap:wrap;gap:8px}
-.fb-tv-links .btn{font-size:12px;min-height:44px;text-decoration:none;white-space:normal}
+.fb-player h3{margin:14px 0 12px;font-size:20px;overflow-wrap:anywhere}
+.fb-player-viewport:not(:empty){margin-bottom:12px}
+.fb-player-viewport video,.fb-player-viewport iframe{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;border:0;border-radius:12px;background:#000}
+.fb-player-viewport audio{display:block;width:100%}
+.fb-player-links{display:flex;flex-wrap:wrap;gap:8px}
+.fb-player-links .btn{font-size:12px;min-height:44px;text-decoration:none;white-space:normal}
 .fb-empty{border:1px dashed #436b81;border-radius:12px;padding:15px;color:#a8c1ce;font-size:13px;line-height:1.6}
 .fb-retry{margin-top:10px;display:inline-flex;padding:9px 11px;border-radius:10px;border:1px solid #6cabb9;background:#14526c;color:white;cursor:pointer;font-size:13px}
 .fb-offline-tag{color:#cfb98f}
@@ -231,17 +232,18 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
       <button id="fbMediaMore" class="btn fb-media-more" type="button" hidden>Mostra altre emittenti</button>
       <button id="fbMediaRetry" class="fb-retry" type="button" hidden>↻ Riprova</button>
     </div>
-    <section id="fbTvPlayer" class="fb-tv-player" aria-labelledby="fbTvTitle" hidden>
-      <button id="fbTvBack" class="btn" type="button">← Elenco TV</button>
-      <h3 id="fbTvTitle"></h3>
-      <div id="fbTvViewport" class="fb-tv-viewport"></div>
-      <p id="fbTvStatus" class="fb-status" role="status"></p>
-      <div id="fbTvLinks" class="fb-tv-links"></div>
+    <section id="fbPlayer" class="fb-player" aria-labelledby="fbPlayerTitle" hidden>
+      <button id="fbPlayerBack" class="btn" type="button"></button>
+      <h3 id="fbPlayerTitle"></h3>
+      <div id="fbPlayerViewport" class="fb-player-viewport"></div>
+      <p id="fbPlayerStatus" class="fb-status" role="status"></p>
+      <button id="fbPlayerRetry" class="fb-retry" type="button" hidden>↻ Riprova</button>
+      <div id="fbPlayerLinks" class="fb-player-links"></div>
     </section>
   </section>
   <div class="fb-footer"><button id="fbBack" class="fb-back">← Torna al globo</button><small>Seleziona un altro Stato<br>dopo aver chiuso la scheda</small></div>
 </section>
-<script src="./media.js?v=20261109-3"></script>
+<script src="./media.js?v=20261109-4"></script>
 <script>
 'use strict';
 let PHYSICAL_B64=null;
