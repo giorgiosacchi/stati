@@ -262,16 +262,25 @@ function createCountryMedia() {
  }
 
  function setSources(type) {
-  if (type === 'radio') {
-   sources.textContent = 'Cataloghi Radio Browser e Famelack.';
-  } else {
+  if(type==='favorites'){
+   sources.textContent='I preferiti sono salvati soltanto su questo dispositivo e restano disponibili anche scegliendo un altro Paese.';
+  }else if(type==='radio'){
+   sources.textContent='Cataloghi Radio Browser e Famelack. La lingua è indicata quando fornita dalla fonte.';
+  }else{
    sources.replaceChildren('Fonte ', link('Catalogo TV Garden (Famelack)', famelackCatalogue),
     '. Località da ', link('IPTV-org', locationsSource), ' quando disponibili.');
   }
  }
 
+ function prepareRow(row){
+  const kind=row.kind||activeType, countryCode=row.countryCode||country?.code||'',
+   countryName=row.countryName||country?.name||'';
+  const key=row.key||mediaStationKey({...row,countryCode},kind);
+  return {...row,kind,countryCode,countryName,key,
+   search:normalize([row.name,row.place,italianPlaces[row.place],countryName,row.language,kind].filter(Boolean).join(' '))};
+ }
  function rowAction(row) {
-  const type = activeType;
+  const type = row.kind||activeType;
   const label = type === 'radio' ? 'Ascolta' : 'Guarda';
   const action = document.createElement('button');
   action.type = 'button';
@@ -290,15 +299,23 @@ function createCountryMedia() {
   for (const row of matches.slice(start, visible)) {
    const item = document.createElement('li');
    item.className = 'fb-media-row';
-   const info = document.createElement('div');
+   const info = document.createElement('div');info.className='fb-media-info';
    const name = document.createElement('strong');
    name.textContent = row.name;
    const location = document.createElement('small');
-   location.textContent = row.place ? (italianPlaces[row.place] || row.place) : country.name + ' · località non indicata';
-   info.append(name, location);
-   const action = rowAction(row);
-   action.className = 'btn';
-   item.append(info, action);
+   const origin=activeType==='favorites' ? row.countryName||row.countryCode : '';
+   const where=row.place?(italianPlaces[row.place]||row.place):'Località non indicata';
+   location.textContent=[origin,where,row.language?'Lingua: '+row.language:''].filter(Boolean).join(' · ');
+   info.append(name,location);
+   const actions=document.createElement('div');actions.className='fb-media-actions';
+   const fav=document.createElement('button');fav.type='button';fav.className='btn fb-media-star';
+   fav.setAttribute('aria-pressed',String(isFavorite(row)));
+   fav.setAttribute('aria-label',(isFavorite(row)?'Rimuovi dai':'Aggiungi ai')+' preferiti: '+row.name);
+   fav.title=isFavorite(row)?'Rimuovi dai preferiti':'Aggiungi ai preferiti';
+   fav.textContent=isFavorite(row)?'★':'☆';
+   fav.addEventListener('click',()=>toggleFavorite(row));
+   const action=rowAction(row);action.className='btn';
+   actions.append(fav,action);item.append(info,actions);
    content.append(item);
   }
   list.append(content);
@@ -307,7 +324,9 @@ function createCountryMedia() {
   const count = matches.length;
   let message = count
    ? (more.hidden ? '' : list.childElementCount + ' di ') + count + (count === 1 ? ' emittente' : ' emittenti')
-   : (terms.length ? 'Nessuna emittente corrisponde alla ricerca.' : 'Nessuna emittente trovata per questo Paese.');
+   : (terms.length?'Nessuna emittente corrisponde alla ricerca.':
+      activeType==='favorites'?'Nessun preferito salvato. Tocca ☆ accanto a una radio o una TV.':
+      'Nessuna emittente trovata per questo Paese.');
   if (partial) message = entries.length ? message + ' · Una fonte è temporaneamente indisponibile.' :
    'Il catalogo non è disponibile. Verifica la connessione e riprova.';
   status.textContent = message;
@@ -334,18 +353,18 @@ function createCountryMedia() {
   const code = country.code;
   setView(type);
   panel.scrollTop = 0;
-  const title = type === 'radio' ? 'Radio del Paese' : 'TV del Paese';
-  $('fbMediaTitle').textContent = country.shared ? title + ' · ' + country.shared : title;
+  const title=type==='favorites'?'Le mie radio e TV preferite':type==='radio'?'Radio del Paese':'TV del Paese';
+  $('fbMediaTitle').textContent=type==='favorites'?title:(country.shared?title+' · '+country.shared:title);
   setSources(type);
   list.replaceChildren();
   filter.value = '';
   filter.hidden = more.hidden = retry.hidden = true;
-  status.textContent = 'Caricamento delle emittenti…';
-  const result = code ? await (type === 'radio' ? loadRadios(code) : loadTV(code)) : {rows:[]};
+  status.textContent=type==='favorites'?'Caricamento preferiti…':'Caricamento delle emittenti…';
+  const result=type==='favorites'?{rows:[...favorites.values()],partial:false}:
+   code?await(type==='radio'?loadRadios(code):loadTV(code)):{rows:[],partial:false};
   if (request !== revision) return;
-  entries = result.rows.map(row => ({
-   ...row, search:normalize([row.name, row.place, italianPlaces[row.place]].filter(Boolean).join(' '))
-  })).sort((a, b) => sort.compare(a.name, b.name) || sort.compare(a.place || '', b.place || ''));
+  entries=result.rows.map(row=>prepareRow({...row,kind:row.kind||type}))
+   .sort((a,b)=>sort.compare(a.name,b.name)||sort.compare(a.place||'',b.place||''));
   partial = result.partial;
   visible = batchSize;
   filter.hidden = !entries.length;
