@@ -1,5 +1,54 @@
 'use strict';
 
+const MEDIA_LANGUAGE_NAMES = {
+ it:'Italiano',ita:'Italiano',italian:'Italiano',
+ en:'Inglese',eng:'Inglese',english:'Inglese',
+ fr:'Francese',fra:'Francese',fre:'Francese',french:'Francese',
+ de:'Tedesco',deu:'Tedesco',ger:'Tedesco',german:'Tedesco',
+ es:'Spagnolo',spa:'Spagnolo',spanish:'Spagnolo',
+ pt:'Portoghese',por:'Portoghese',portuguese:'Portoghese',
+ ru:'Russo',rus:'Russo',russian:'Russo',zh:'Cinese',zho:'Cinese',chi:'Cinese',
+ ja:'Giapponese',jpn:'Giapponese',ar:'Arabo',ara:'Arabo',
+ nl:'Olandese',nld:'Olandese',dut:'Olandese',el:'Greco',ell:'Greco',gre:'Greco',
+ tr:'Turco',tur:'Turco',hi:'Hindi',hin:'Hindi',ko:'Coreano',kor:'Coreano',
+ pl:'Polacco',pol:'Polacco',uk:'Ucraino',ukr:'Ucraino',he:'Ebraico',heb:'Ebraico',
+ ro:'Rumeno',ron:'Rumeno',sv:'Svedese',swe:'Svedese',da:'Danese',dan:'Danese',
+ no:'Norvegese',nor:'Norvegese',fi:'Finlandese',fin:'Finlandese',
+ cs:'Ceco',ces:'Ceco',cze:'Ceco',hu:'Ungherese',hun:'Ungherese'
+};
+function mediaLanguage(raw) {
+ if (!raw) return '';
+ const values = Array.isArray(raw) ? raw : (typeof raw === 'string' ? raw.split(/[,;|]/) : []);
+ const translated=values.map(v => {
+  const value=String(v||'').trim();if(!value)return '';
+  const code=value.toLowerCase().replace(/_/g,'-');
+  if(MEDIA_LANGUAGE_NAMES[code])return MEDIA_LANGUAGE_NAMES[code];
+  if(/^[a-z]{2,3}(?:-[a-z]{2})?$/.test(code)){
+   try{
+    const label=new Intl.DisplayNames(['it'],{type:'language'}).of(code);
+    if(label&&label.toLowerCase()!==code)return label.charAt(0).toLocaleUpperCase('it')+label.slice(1);
+   }catch{}
+  }
+  return value.charAt(0).toLocaleUpperCase('it')+value.slice(1);
+ }).filter(Boolean);
+ return [...new Set(translated)].join(', ');
+}
+const MEDIA_FAVORITES_KEY='terra3d-media-favorites-v1';
+const MEDIA_VOLUME_KEY='terra3d-media-volume-v1';
+function readMediaFavorites(){
+ try{
+  const rows=JSON.parse(localStorage.getItem(MEDIA_FAVORITES_KEY)||'[]');
+  if(!Array.isArray(rows))return new Map();
+  const valid=rows.filter(row=>row&&typeof row.name==='string'&&typeof row.key==='string'
+   &&['radio','tv'].includes(row.kind)&&Array.isArray(row.streams)).slice(0,250);
+  return new Map(valid.map(row=>[row.key,row]));
+ }catch{return new Map();}
+}
+function mediaStationKey(row,type){
+ const norm=value=>String(value||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'')
+  .toLowerCase().trim().replace(/\s+/g,' ');
+ return [type,row.countryCode||'',norm(row.name),norm(row.place)].join('|');
+}
 function createCountryMedia() {
  const famelack = 'https://famelack.com';
  const famelackCatalogue = 'https://github.com/famelack/famelack-data';
@@ -37,8 +86,34 @@ function createCountryMedia() {
  const more = $('fbMediaMore');
  const retry = $('fbMediaRetry');
  const requests = new Map();
- const player = createCountryPlayer(panel, link);
+ const favorites=readMediaFavorites();
  let country, activeType, revision = 0;
+ const isFavorite=row=>favorites.has(row.key||mediaStationKey(row,row.kind||activeType));
+ function syncFavoritesButton(){
+  const button=[...buttons].find(item=>item.dataset.media==='favorites');
+  if(button)button.textContent='★ Preferiti'+(favorites.size?' ('+favorites.size+')':'');
+ }
+ function toggleFavorite(row){
+  const kind=row.kind||activeType,key=row.key||mediaStationKey(row,kind);
+  if(favorites.has(key))favorites.delete(key);
+  else{
+   if(favorites.size>=250){status.textContent='Puoi salvare al massimo 250 preferiti.';return;}
+   favorites.set(key,{key,kind,name:row.name,place:row.place||'',
+    countryCode:row.countryCode||country?.code||'',countryName:row.countryName||country?.name||'',
+    language:row.language||'',href:row.href||'',official:row.official||'',
+    streams:(row.streams||[]).slice(0,8),youtube:(row.youtube||[]).slice(0,8)});
+  }
+  try{localStorage.setItem(MEDIA_FAVORITES_KEY,JSON.stringify([...favorites.values()]));}
+  catch{status.textContent='Impossibile salvare i preferiti nel dispositivo.';}
+  syncFavoritesButton();
+  if(activeType==='favorites'){
+   entries=[...favorites.values()].map(prepareRow).sort((a,b)=>sort.compare(a.name,b.name));
+   visible=Math.max(batchSize,visible);render();
+  }else if(activeType)render();
+  player.refreshFavorite();
+ }
+ const player=createCountryPlayer(panel,link,{isFavorite,toggleFavorite});
+ syncFavoritesButton();
  let entries = [], visible = batchSize, partial = false;
 
  async function fetchJSON(url, emptyOn404 = false) {
@@ -131,7 +206,8 @@ function createCountryMedia() {
    const place = station.state?.trim() || '';
    const key = normalize(italianPlaces[place] || place);
    const group = byPlace(name);
-   const row = group.get(key) || {name, place, streams:[]};
+   const row = group.get(key) || {name, place, streams:[], language:''};
+   if(!row.language)row.language=mediaLanguage(station.languagecodes||station.language);
    const hls = Number(station.hls) === 1;
    row.streams = mergeStreams(row.streams, [streamSource(station.url, hls), streamSource(station.url_resolved, hls)]);
    group.set(key, row);
@@ -145,8 +221,11 @@ function createCountryMedia() {
    // Collega i cataloghi tramite lo stesso flusso, oppure tramite un nome univoco nel Paese.
    const matched = candidates.find(row => row.streams.some(known => streams.some(stream => stream.url === known.url)))
     || (candidates.length === 1 ? candidates[0] : group.get(''));
-   if (matched) matched.streams = mergeStreams(streams, matched.streams);
-   else group.set('', {name, place:station.city, streams});
+   const language=mediaLanguage(station.languagecodes||station.languages||station.language);
+   if(matched){
+    matched.streams=mergeStreams(streams,matched.streams);
+    if(!matched.language)matched.language=language;
+   }else group.set('', {name,place:station.city,streams,language});
   }
   const rows = [...stations.values()].flatMap(group => [...group.values()]).filter(row => row.streams.length);
   return {rows, partial:browser.status === 'rejected' || catalogue.status === 'rejected'};
@@ -164,6 +243,7 @@ function createCountryMedia() {
    && /^[A-Za-z0-9_-]+$/.test(channel.nanoid))
    .map(channel => ({
     name:channel.name, place:channel.city || locations.value?.places?.[channel.nanoid],
+    language:mediaLanguage(channel.languagecodes||channel.languages||channel.language||channel.lang),
     href:famelack + path + '/' + channel.nanoid,
     official:code === 'IT' ? italianTvSites.get(normalize(channel.name)) : undefined,
     streams:catalogueStreams(channel).filter(stream => stream.hls),
