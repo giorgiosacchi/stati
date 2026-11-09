@@ -1,7 +1,7 @@
 // Terra 3D Factbook v3.1 - GitHub Pages offline PWA
-const CACHE='terra-3d-factbook-v12-20261109-tv-unificate';
+const CACHE='terra-3d-factbook-v13-20261109-tv-liguri';
 const DATA='terra-3d-factbook-archivio-cia-v1';
-const SHELL=['./','./index.html','./media.js?v=20261109-7'];
+const SHELL=['./','./index.html','./media.js?v=20261109-8'];
 const FILES=["./manifest.webmanifest","./icons/icon-192.png","./icons/icon-512.png","./data/fisica-01.txt","./data/fisica-02.txt","./data/fisica-03.txt","./data/fisica-04.txt","./data/fisica-05.txt","./data/fisica-06.txt","./data/fisica-07.txt","./data/fisica-08.txt","./data/fisica-09.txt","./data/fisica-10.txt","./data/fisica-11.txt","./data/fisica-12.txt","./data/fisica-13.txt","./data/fisica-14.txt","./data/fisica-15.txt","./data/fisica-16.txt","./data/fisica-17.txt","./data/fisica-18.txt","./data/fisica-19.txt","./data/fisica-20.txt","./data/fisica-21.txt","./data/fisica-22.txt","./data/fisica-23.txt","./data/satellite-01.txt","./data/satellite-02.txt","./data/satellite-03.txt","./data/satellite-04.txt","./data/satellite-05.txt","./data/satellite-06.txt","./data/satellite-07.txt","./data/satellite-08.txt"];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE)
  .then(c=>c.addAll([...SHELL.map(path=>new Request(path,{cache:'reload'})),...FILES]))

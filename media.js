@@ -270,6 +270,7 @@ function createCountryMedia() {
      youtube:[...(incoming.youtube || [])],sources:[...(incoming.sources || [])]};
     rows.push(row);
    }
+   if (nameKey === 'telenord') row.name = 'Telenord';
    if (nameKey) byName.set(nameKey,row);
    for (const stream of row.streams) byStream.set(stream.url,row);
   }
@@ -381,7 +382,7 @@ function createCountryMedia() {
    countryName=row.countryName||country?.name||'';
   const key=row.key||mediaStationKey({...row,countryCode},kind);
   return {...row,kind,countryCode,countryName,key,
-   search:normalize([row.name,row.place,italianPlaces[row.place],countryName,row.language,kind].filter(Boolean).join(' '))};
+   search:normalize([row.name,row.name==='Telenord'?'Tele Nord Genova':'',row.place,italianPlaces[row.place],countryName,row.language,kind].filter(Boolean).join(' '))};
  }
  function rowAction(row) {
   const type = row.kind||activeType;
