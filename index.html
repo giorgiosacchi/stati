@@ -143,6 +143,18 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
 .fb-media-row strong{font-size:14px}
 .fb-media-row small{margin-top:3px;color:#a7c6d9;font-size:12px}
 .fb-media-row .btn{flex:none;font-size:12px;min-height:44px;color:#a9efff;text-decoration:none}
+.fb-media-actions{display:flex;align-items:center;gap:5px;flex:none}
+.fb-media-row .fb-media-star,.fb-player-fav{font-size:18px;min-width:42px;min-height:44px;padding:5px 8px;color:#ffd781}
+.fb-media-row .fb-media-star[aria-pressed="true"],.fb-player-fav[aria-pressed="true"]{color:#ffcc67;border-color:#cfaa55;background:#3c321d}
+.fb-media-row .fb-media-info{min-width:0}
+.fb-player-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:9px;margin-bottom:12px}
+.fb-player-language{color:#b5d4e6;font-size:12px}
+.fb-player-volume{display:flex;align-items:center;gap:10px;background:#0b2030;border:1px solid #27475d;border-radius:12px;padding:10px 12px;margin-bottom:12px}
+.fb-player-volume label{font-size:13px;white-space:nowrap}
+.fb-player-volume input{min-width:70px;flex:1;accent-color:#80d9ee;touch-action:pan-x}
+.fb-player-volume output{min-width:43px;text-align:right;font-size:13px;color:#a9efff;font-variant-numeric:tabular-nums}
+.fb-player-volume .btn{min-height:44px;min-width:44px;font-size:21px;padding:7px}
+@media(max-width:460px){.fb-media-row{gap:6px}.fb-media-actions{gap:3px}.fb-media-row .fb-media-star{min-width:38px}.fb-media-row .btn{padding:8px}.fb-player-volume{gap:6px;padding:8px}.fb-player-volume label{font-size:12px}}
 .fb-media-more{margin-top:12px}
 .fb-player h3{margin:14px 0 12px;font-size:20px;overflow-wrap:anywhere}
 .fb-player-viewport:not(:empty){margin-bottom:12px}
@@ -222,6 +234,7 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
     <div class="fb-media-nav" role="group" aria-label="Emittenti del Paese">
       <button class="btn" type="button" data-media="radio" aria-controls="fbMedia" aria-pressed="false">Radio</button>
       <button class="btn" type="button" data-media="tv" aria-controls="fbMedia" aria-pressed="false">TV</button>
+      <button class="btn" type="button" data-media="favorites" aria-controls="fbMedia" aria-pressed="false">★ Preferiti</button>
     </div>
   </div>
   <div id="fbScroll" class="fb-scroll">
@@ -237,7 +250,7 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
         <button id="fbMediaBack" class="btn" type="button">← Dati del Paese</button>
       </div>
       <p id="fbMediaSources" class="fb-media-sources"></p>
-      <input id="fbMediaFilter" class="fb-search" type="search" placeholder="Cerca per nome o località…" aria-label="Cerca un’emittente per nome o località" autocomplete="off" hidden>
+      <input id="fbMediaFilter" class="fb-search" type="search" placeholder="Cerca per nome, lingua o località…" aria-label="Cerca un’emittente per nome, lingua o località" autocomplete="off" hidden>
       <div id="fbMediaStatus" class="fb-status" role="status"></div>
       <ul id="fbMediaList" class="fb-media-list" role="list"></ul>
       <button id="fbMediaMore" class="btn fb-media-more" type="button" hidden>Mostra altre emittenti</button>
@@ -246,7 +259,17 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
     <section id="fbPlayer" class="fb-player" aria-labelledby="fbPlayerTitle" hidden>
       <button id="fbPlayerBack" class="btn" type="button"></button>
       <h3 id="fbPlayerTitle"></h3>
+       <div class="fb-player-actions">
+         <button id="fbPlayerFavorite" class="btn fb-player-fav" type="button" aria-pressed="false">☆ Aggiungi ai preferiti</button>
+         <span id="fbPlayerLanguage" class="fb-player-language"></span>
+       </div>
       <div id="fbPlayerViewport" class="fb-player-viewport"></div>
+       <div id="fbPlayerVolume" class="fb-player-volume">
+         <button id="fbPlayerMute" class="btn" type="button" aria-label="Disattiva audio" aria-pressed="false">🔊</button>
+         <label for="fbVolumeSlider">Volume</label>
+         <input type="range" id="fbVolumeSlider" min="0" max="100" step="1" value="80" aria-label="Volume di radio o TV">
+         <output id="fbVolumeValue" for="fbVolumeSlider">80%</output>
+       </div>
       <p id="fbPlayerStatus" class="fb-status" role="status"></p>
       <button id="fbPlayerRetry" class="fb-retry" type="button" hidden>↻ Riprova</button>
       <section id="fbPlayerTimer" class="fb-player-timer" aria-labelledby="fbTimerTitle">
@@ -273,7 +296,7 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
   </section>
   <div class="fb-footer"><button id="fbBack" class="fb-back">← Torna al globo</button><small>Seleziona un altro Stato<br>dopo aver chiuso la scheda</small></div>
 </section>
-<script src="./media.js?v=20261109-5"></script>
+<script src="./media.js?v=20261109-6"></script>
 <script>
 'use strict';
 let PHYSICAL_B64=null;
