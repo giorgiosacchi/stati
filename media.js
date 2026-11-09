@@ -4,8 +4,17 @@ function createCountryMedia() {
  const radioGarden = 'https://radio.garden';
  const radioBrowser = 'https://www.radio-browser.info/';
  const famelack = 'https://famelack.com';
+ const famelackCatalogue = 'https://github.com/famelack/famelack-data';
  const famelackData = 'https://raw.githubusercontent.com/famelack/famelack-data/main/tv/raw/countries/';
  const locationsSource = 'https://github.com/iptv-org/database/blob/6321df850d653f192ca61f9d521e5f6bb0c9a320/data/channels.csv';
+ const italianTvSites = new Map([
+  ['rai 1','https://www.raiplay.it/dirette/rai1'],
+  ['rai 2','https://www.raiplay.it/dirette/rai2'],
+  ['rai 3','https://www.raiplay.it/dirette/rai3'],
+  ['rai news 24','https://www.raiplay.it/dirette/rainews24'],
+  ['la7','https://www.la7play.it/dirette/la7'],
+  ['primocanale','https://www.primocanale.it/diretta.html']
+ ]);
  const missingCodes = {
   Brunei:'BN', 'Cape Verde':'CV', 'Falkland Islands':'FK', 'Pitcairn Islands':'PN', Macau:'MO',
   Russia:'RU', 'Saint Helena':'SH', 'São Tomé and Príncipe':'ST', Turkey:'TR'
@@ -30,6 +39,7 @@ function createCountryMedia() {
  const more = $('fbMediaMore');
  const retry = $('fbMediaRetry');
  const requests = new Map();
+ const tvPlayer = createTVPlayer(panel, link);
  let country, activeType, revision = 0;
  let entries = [], visible = batchSize, partial = false;
 
@@ -113,14 +123,18 @@ function createCountryMedia() {
    cached('tv:' + code, () => fetchJSON(famelackData + slug + '.json', true)),
    cached('tv-locations', () => fetchJSON('./data/tv-localita.json'))
   ]);
-  if (!Array.isArray(catalogue.value)) return {rows:[], path, partial:true};
+  if (!Array.isArray(catalogue.value)) return {rows:[], partial:true};
   const rows = catalogue.value.filter(channel => channel.name && typeof channel.nanoid === 'string'
    && /^[A-Za-z0-9_-]+$/.test(channel.nanoid))
    .map(channel => ({
     name:channel.name, place:channel.city || locations.value?.places?.[channel.nanoid],
-    href:famelack + path + '/' + channel.nanoid
+    href:famelack + path + '/' + channel.nanoid,
+    official:code === 'IT' ? italianTvSites.get(normalize(channel.name)) : undefined,
+    streams:Array.isArray(channel.sources?.streams) ? channel.sources.streams.map(streamLink)
+     .filter(url => url.startsWith('https://') && /\.m3u8(?:[?#]|$)/i.test(url)) : [],
+    youtube:Array.isArray(channel.sources?.youtube) ? channel.sources.youtube.map(youtubeId).filter(Boolean) : []
    }));
-  return {rows, path, partial:false};
+  return {rows, partial:false};
  }
 
  function link(label, href) {
@@ -137,9 +151,23 @@ function createCountryMedia() {
    sources.replaceChildren('Fonti ', link('Radio Garden', radioGarden + (path || '/search')),
     ' e ', link('Radio Browser', radioBrowser), '.');
   } else {
-   sources.replaceChildren('Fonte ', link('TV Garden (Famelack)', famelack + (path || '/tv')),
+   sources.replaceChildren('Fonte ', link('Catalogo TV Garden (Famelack)', famelackCatalogue),
     '. Località da ', link('IPTV-org', locationsSource), ' quando disponibili.');
   }
+ }
+
+ function rowAction(row) {
+  if (activeType === 'radio') {
+   const anchor = link('Ascolta ↗', row.href);
+   anchor.setAttribute('aria-label', 'Ascolta ' + row.name + ' (si apre in un’altra scheda)');
+   return anchor;
+  }
+  const watch = document.createElement('button');
+  watch.type = 'button';
+  watch.textContent = 'Guarda';
+  watch.setAttribute('aria-label', 'Guarda ' + row.name);
+  watch.addEventListener('click', () => tvPlayer.open(row, watch));
+  return watch;
  }
 
  function render(append = false) {
@@ -157,16 +185,14 @@ function createCountryMedia() {
    const location = document.createElement('small');
    location.textContent = row.place ? (italianPlaces[row.place] || row.place) : country.name + ' · località non indicata';
    info.append(name, location);
-   const action = activeType === 'radio' ? 'Ascolta' : 'Guarda';
-   const anchor = link(action + ' ↗', row.href);
-   anchor.className = 'btn';
-   anchor.setAttribute('aria-label', action + ' ' + row.name + ' (si apre in un’altra scheda)');
-   item.append(info, anchor);
+   const action = rowAction(row);
+   action.className = 'btn';
+   item.append(info, action);
    content.append(item);
   }
   list.append(content);
   more.hidden = matches.length <= visible;
-  if (append && more.hidden) list.children[start]?.querySelector('a').focus();
+  if (append && more.hidden) list.children[start]?.querySelector('.btn')?.focus();
   const count = matches.length;
   let message = count
    ? (more.hidden ? '' : list.childElementCount + ' di ') + count + (count === 1 ? ' emittente' : ' emittenti')
@@ -177,6 +203,7 @@ function createCountryMedia() {
  }
 
  function setView(type) {
+  tvPlayer.close();
   activeType = type;
   for (const button of buttons) button.setAttribute('aria-pressed', String(button.dataset.media === type));
   panel.hidden = !type;
@@ -234,4 +261,167 @@ function createCountryMedia() {
   country = place ? {name:place[0], code:iso || missingCodes[place[1]], shared:sharedCatalogues[place[1]]} : null;
   showInfo();
  };
+}
+
+function youtubeId(url) {
+ return typeof url === 'string'
+  ? /^https:\/\/www\.youtube-nocookie\.com\/embed\/([\w-]{11})(?:[?#]|$)/.exec(url)?.[1] : undefined;
+}
+
+function createTVPlayer(panel, link) {
+ const directory = $('fbMediaDirectory');
+ const player = $('fbTvPlayer');
+ const title = $('fbTvTitle');
+ const back = $('fbTvBack');
+ const viewport = $('fbTvViewport');
+ const status = $('fbTvStatus');
+ const links = $('fbTvLinks');
+ let opener, directoryScroll, hlsScript;
+ let stopStream = () => {};
+
+ function loadHls() {
+  if (!hlsScript) {
+   hlsScript = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = './vendor/hls-1.7.1.min.js';
+    const fail = () => {
+     clearTimeout(timer);
+     script.remove();
+     reject(Error('Lettore HLS non disponibile'));
+    };
+    const timer = setTimeout(fail, 10000);
+    script.onerror = fail;
+    script.onload = () => {
+     clearTimeout(timer);
+     if (window.Hls) resolve(window.Hls);
+     else fail();
+    };
+    document.head.append(script);
+   }).catch(error => {
+    hlsScript = null;
+    throw error;
+   });
+  }
+  return hlsScript;
+ }
+
+ function close(restoreFocus = false) {
+  if (player.hidden) return;
+  stopStream();
+  stopStream = () => {};
+  viewport.replaceChildren();
+  links.replaceChildren();
+  player.hidden = true;
+  directory.hidden = false;
+  panel.setAttribute('aria-labelledby', 'fbMediaTitle');
+  if (restoreFocus) {
+   panel.scrollTop = directoryScroll;
+   opener?.focus({preventScroll:true});
+  }
+  opener = null;
+ }
+
+ function open(row, button) {
+  close();
+  opener = button;
+  directoryScroll = panel.scrollTop;
+  directory.hidden = true;
+  title.textContent = row.name;
+  player.hidden = false;
+  panel.setAttribute('aria-labelledby', 'fbTvTitle');
+  panel.scrollTop = 0;
+  back.focus({preventScroll:true});
+
+  function addLink(label, href) {
+   const anchor = link(label + ' ↗', href);
+   anchor.className = 'btn';
+   links.append(anchor);
+  }
+  if (row.official) addLink('Diretta sul sito dell’emittente', row.official);
+  if (row.youtube.length) addLink('Apri su YouTube', 'https://www.youtube.com/watch?v=' + row.youtube[0]);
+  if (!links.childElementCount) {
+   if (row.streams.length) addLink('Link al flusso HLS', row.streams[0]);
+   else addLink('Pagina del canale su Famelack', row.href);
+  }
+  links.hidden = !row.official && !row.youtube.length;
+
+  const options = [...row.streams.map(url => ({url})), ...row.youtube.map(id => ({id}))];
+  function trySource(index) {
+   viewport.replaceChildren();
+   const source = options[index];
+   if (!source) {
+    links.hidden = false;
+    status.textContent = 'Diretta non disponibile nel lettore. Puoi aprire il collegamento qui sotto.';
+    return;
+   }
+   if (source.id) {
+    const frame = document.createElement('iframe');
+    frame.title = 'Diretta di ' + row.name;
+    frame.src = 'https://www.youtube-nocookie.com/embed/' + source.id + '?autoplay=1&playsinline=1';
+    frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+    frame.allowFullscreen = true;
+    frame.referrerPolicy = 'strict-origin-when-cross-origin';
+    viewport.append(frame);
+    status.textContent = 'Diretta YouTube';
+    return;
+   }
+
+   const video = document.createElement('video');
+   video.controls = true;
+   video.setAttribute('playsinline', '');
+   video.preload = 'auto';
+   video.setAttribute('aria-label', 'Diretta di ' + row.name);
+   viewport.append(video);
+   status.textContent = 'Caricamento della diretta…';
+   let cancelled = false, hls;
+   const stop = () => {
+    cancelled = true;
+    clearTimeout(timer);
+    hls?.destroy();
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+   };
+   stopStream = stop;
+   const fail = () => {
+    if (cancelled) return;
+    stop();
+    stopStream = () => {};
+    trySource(index + 1);
+   };
+   const timer = setTimeout(fail, 18000);
+   const play = () => {
+    if (!cancelled) video.play().catch(() => {});
+   };
+   video.addEventListener('error', fail);
+   video.addEventListener('canplay', () => {
+    if (cancelled) return;
+    clearTimeout(timer);
+    if (video.paused) status.textContent = 'Premi Riproduci per avviare la diretta.';
+   });
+   video.addEventListener('playing', () => {
+    if (cancelled) return;
+    clearTimeout(timer);
+    status.textContent = 'In diretta';
+   });
+   if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = source.url;
+    play();
+    return;
+   }
+   loadHls().then(Hls => {
+    if (cancelled) return;
+    if (!Hls.isSupported()) return fail();
+    hls = new Hls({capLevelToPlayerSize:true});
+    hls.on(Hls.Events.MEDIA_ATTACHED, play);
+    hls.on(Hls.Events.ERROR, (_event, details) => { if (details.fatal) fail(); });
+    hls.loadSource(source.url);
+    hls.attachMedia(video);
+   }).catch(fail);
+  }
+  trySource(0);
+ }
+
+ back.addEventListener('click', () => close(true));
+ return {open, close};
 }

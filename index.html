@@ -144,6 +144,11 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
 .fb-media-row small{margin-top:3px;color:#a7c6d9;font-size:12px}
 .fb-media-row .btn{flex:none;font-size:12px;min-height:44px;color:#a9efff;text-decoration:none}
 .fb-media-more{margin-top:12px}
+.fb-tv-player h3{margin:14px 0 12px;font-size:20px;overflow-wrap:anywhere}
+.fb-tv-viewport:not(:empty){margin-bottom:12px}
+.fb-tv-viewport video,.fb-tv-viewport iframe{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;border:0;border-radius:12px;background:#000}
+.fb-tv-links{display:flex;flex-wrap:wrap;gap:8px}
+.fb-tv-links .btn{font-size:12px;min-height:44px;text-decoration:none;white-space:normal}
 .fb-empty{border:1px dashed #436b81;border-radius:12px;padding:15px;color:#a8c1ce;font-size:13px;line-height:1.6}
 .fb-retry{margin-top:10px;display:inline-flex;padding:9px 11px;border-radius:10px;border:1px solid #6cabb9;background:#14526c;color:white;cursor:pointer;font-size:13px}
 .fb-offline-tag{color:#cfb98f}
@@ -214,20 +219,29 @@ main{position:relative;isolation:isolate;min-height:0;flex:1;background:radial-g
     <div class="fb-sources">Fonte: CIA World Factbook, ultima edizione archiviata (gennaio 2026). La CIA ha cessato la pubblicazione il 4 febbraio 2026. I dati non rappresentano necessariamente valori aggiornati al 2026. Traduzione italiana automatica a partire dall'originale inglese, disponibile con connessione Internet; verifica sempre i dati più importanti sulla fonte.<div id="fbCiteLinks"></div></div>
   </div>
   <section id="fbMedia" class="fb-scroll" aria-labelledby="fbMediaTitle" hidden>
-    <div class="fb-media-heading">
-      <h3 id="fbMediaTitle"></h3>
-      <button id="fbMediaBack" class="btn" type="button">← Dati del Paese</button>
+    <div id="fbMediaDirectory">
+      <div class="fb-media-heading">
+        <h3 id="fbMediaTitle"></h3>
+        <button id="fbMediaBack" class="btn" type="button">← Dati del Paese</button>
+      </div>
+      <p id="fbMediaSources" class="fb-media-sources"></p>
+      <input id="fbMediaFilter" class="fb-search" type="search" placeholder="Cerca per nome o località…" aria-label="Cerca un’emittente per nome o località" autocomplete="off" hidden>
+      <div id="fbMediaStatus" class="fb-status" role="status"></div>
+      <ul id="fbMediaList" class="fb-media-list" role="list"></ul>
+      <button id="fbMediaMore" class="btn fb-media-more" type="button" hidden>Mostra altre emittenti</button>
+      <button id="fbMediaRetry" class="fb-retry" type="button" hidden>↻ Riprova</button>
     </div>
-    <p id="fbMediaSources" class="fb-media-sources"></p>
-    <input id="fbMediaFilter" class="fb-search" type="search" placeholder="Cerca per nome o località…" aria-label="Cerca un’emittente per nome o località" autocomplete="off" hidden>
-    <div id="fbMediaStatus" class="fb-status" role="status"></div>
-    <ul id="fbMediaList" class="fb-media-list" role="list"></ul>
-    <button id="fbMediaMore" class="btn fb-media-more" type="button" hidden>Mostra altre emittenti</button>
-    <button id="fbMediaRetry" class="fb-retry" type="button" hidden>↻ Riprova</button>
+    <section id="fbTvPlayer" class="fb-tv-player" aria-labelledby="fbTvTitle" hidden>
+      <button id="fbTvBack" class="btn" type="button">← Elenco TV</button>
+      <h3 id="fbTvTitle"></h3>
+      <div id="fbTvViewport" class="fb-tv-viewport"></div>
+      <p id="fbTvStatus" class="fb-status" role="status"></p>
+      <div id="fbTvLinks" class="fb-tv-links"></div>
+    </section>
   </section>
   <div class="fb-footer"><button id="fbBack" class="fb-back">← Torna al globo</button><small>Seleziona un altro Stato<br>dopo aver chiuso la scheda</small></div>
 </section>
-<script src="./media.js?v=20261109-2"></script>
+<script src="./media.js?v=20261109-3"></script>
 <script>
 'use strict';
 let PHYSICAL_B64=null;
