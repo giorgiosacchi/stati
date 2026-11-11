@@ -807,7 +807,7 @@ function createCountryPlayer(panel, link, favoritesAPI) {
   let sourceIndex=0;
   nextSource.hidden=options.length<2;
   nextSource.onclick=()=>{stopPlayback();trySource((sourceIndex+1)%options.length);};
-  function trySource(index) {
+  function trySource(index, nativeFallback = false) {
    if (sleepTimer.expireIfDue()) return;
    sourceIndex=index;
    timerPanel.hidden = false;
@@ -849,7 +849,8 @@ function createCountryPlayer(panel, link, favoritesAPI) {
    media.setAttribute('aria-label', 'Diretta di ' + row.name);
    currentMedia=media;viewport.append(media);applyVolume();
    status.textContent = index?'Provo un collegamento alternativo…':'Caricamento della diretta…';
-   let cancelled = false, hls,stallTimer;
+   let cancelled = false, hls,stallTimer,usingNative=nativeFallback||!source.hls;
+   const nativeHls=source.hls&&Boolean(media.canPlayType('application/vnd.apple.mpegurl'));
    const stop = () => {
     cancelled = true;
     clearTimeout(timer);
@@ -864,7 +865,10 @@ function createCountryPlayer(panel, link, favoritesAPI) {
     if (cancelled) return;
     stop();
     stopStream = () => {};
-    trySource(index + 1);
+    // Alcuni browser dichiarano HLS nativo ma non avviano determinate dirette.
+    // Prova entrambi i lettori prima di scartare l'indirizzo.
+    if(source.hls&&!usingNative&&nativeHls)trySource(index,true);
+    else trySource(index + 1);
    };
    const timer = setTimeout(fail, 18000);
    const play = () => {
@@ -891,14 +895,18 @@ function createCountryPlayer(panel, link, favoritesAPI) {
     clearTimeout(stallTimer);stallTimer=null;
     status.textContent = 'In diretta';
    });
-   if (!source.hls || media.canPlayType('application/vnd.apple.mpegurl')) {
+   const playNative=()=>{
+    usingNative=true;
     media.src = source.url;
     play();
+   };
+   if (usingNative) {
+    playNative();
     return;
    }
    loadHls().then(Hls => {
     if (cancelled || sleepTimer.expireIfDue()) return;
-    if (!Hls.isSupported()) return fail();
+    if (!Hls.isSupported()) return nativeHls?playNative():fail();
     hls = new Hls({capLevelToPlayerSize:!isRadio});
     hls.on(Hls.Events.MEDIA_ATTACHED, play);
     hls.on(Hls.Events.ERROR, (_event, details) => { if (details.fatal) fail(); });
