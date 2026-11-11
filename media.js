@@ -161,8 +161,13 @@ function createCountryMedia() {
 
  function fetchFamelack(kind, slug) {
   return cached('famelack:' + kind + ':' + slug, async () => {
-   const rows = await fetchJSON(famelackData + kind + '/raw/countries/' + slug + '.json', true);
+   const rows = await fetchJSON(famelackData + kind + '/countries/' + slug + '.json', true);
    if (!Array.isArray(rows)) throw Error('Catalogo non valido');
+   if (!rows.length) {
+    const countries = await cached('famelack-countries:' + kind,
+     () => fetchJSON(famelackData + kind + '/countries_metadata.json'));
+    if (countries[slug.toUpperCase()]?.channelCount > 0) throw Error('Catalogo del Paese temporaneamente non disponibile');
+   }
    return rows;
   });
  }
@@ -334,7 +339,7 @@ function createCountryMedia() {
   const [catalogue, locations, iptvOrg, freeTV] = await Promise.allSettled([
    fetchFamelack('tv', slug),
    cached('tv-locations', () => fetchJSON('./data/tv-localita.json')),
-   fetchTVPlaylist(iptvOrgCountryBase + code.toLowerCase() + '.m3u', 'IPTV-org'),
+   fetchTVPlaylist(iptvOrgCountryBase + slug + '.m3u', 'IPTV-org'),
    code === 'IT' ? fetchTVPlaylist(freeTVItalyPlaylist, 'Free-TV') : Promise.resolve([])
   ]);
   const previous = Array.isArray(catalogue.value) ? catalogue.value.filter(channel =>
