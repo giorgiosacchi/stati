@@ -809,7 +809,7 @@ function createCountryPlayer(panel, link, favoritesAPI) {
   nextSource.onclick=()=>{stopPlayback();trySource((sourceIndex+1)%options.length);};
   function trySource(index, nativeFallback = false) {
    if (sleepTimer.expireIfDue()) return;
-   sourceIndex=index;
+   sourceIndex=Math.min(index,options.length-1);
    timerPanel.hidden = false;
    retry.hidden = true;
    retry.textContent = '↻ Riprova';
