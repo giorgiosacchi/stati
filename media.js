@@ -90,6 +90,7 @@ function createCountryMedia() {
  const more = $('fbMediaMore');
  const retry = $('fbMediaRetry');
  const requests = new Map();
+ const catalogueCache='terra3d-media-catalogues-v1';
  const favorites=readMediaFavorites();
  let country, activeType, revision = 0;
  const isFavorite=row=>favorites.has(row.key||mediaStationKey(row,row.kind||activeType));
@@ -118,23 +119,55 @@ function createCountryMedia() {
  }
  const player=createCountryPlayer(panel,link,{isFavorite,toggleFavorite});
  syncFavoritesButton();
- let entries = [], visible = batchSize, partial = false;
+ let entries = [], visible = batchSize, partial = false, savedCatalogue = false;
 
  async function fetchJSON(url, emptyOn404 = false) {
-  const response = await fetch(url, {signal:AbortSignal.timeout(12000)});
+  const response = await fetch(url, {signal:AbortSignal.timeout(12000),cache:'no-cache'});
   if (emptyOn404 && response.status === 404) return [];
   if (!response.ok) throw Error('HTTP ' + response.status);
   return response.json();
  }
 
  function cached(key, load) {
-  if (!requests.has(key)) {
-   requests.set(key, load().catch(error => {
-    requests.delete(key);
+  let entry=requests.get(key);
+  if (!entry || Date.now()-entry.time>120000) {
+   entry={time:Date.now()};
+   entry.promise=load().catch(error => {
+    if(requests.get(key)===entry)requests.delete(key);
     throw error;
-   }));
+   });
+   requests.set(key,entry);
   }
-  return requests.get(key);
+  return entry.promise;
+ }
+
+ // Conserva l'ultimo elenco valido della singola fonte, senza trattare un guasto come una rimozione.
+ async function catalogueWithFallback(key, load) {
+  const url=new URL('./_media-catalogue/'+encodeURIComponent(key)+'.json',document.baseURI).href;
+  async function savedRows(){
+   if(window.caches)try{
+    const response=await(await window.caches.open(catalogueCache)).match(url);
+    const saved=response?await response.json():null;
+    if(Array.isArray(saved?.rows)&&saved.rows.length)return {rows:saved.rows,stale:true};
+   }catch{}
+   return null;
+  }
+  try {
+   const rows=await load();
+   if(!Array.isArray(rows))throw Error('Catalogo non valido');
+   if(!rows.length){const saved=await savedRows();if(saved)return saved;}
+   if(rows.length && window.caches)try{
+    const cache=await window.caches.open(catalogueCache);
+    await cache.put(url,new Response(JSON.stringify({savedAt:Date.now(),rows}),{
+     headers:{'Content-Type':'application/json'}
+    }));
+   }catch{}
+   return {rows,stale:false};
+  }catch(error){
+   const saved=await savedRows();
+   if(saved)return saved;
+   throw error;
+  }
  }
 
  async function browserRadios(code) {
@@ -163,6 +196,8 @@ function createCountryMedia() {
   return cached('famelack:' + kind + ':' + slug, async () => {
    const rows = await fetchJSON(famelackData + kind + '/countries/' + slug + '.json', true);
    if (!Array.isArray(rows)) throw Error('Catalogo non valido');
+   if(rows.length&&!rows.some(row=>row&&typeof row.name==='string'&&
+    (kind!=='tv'||typeof row.nanoid==='string')))throw Error('Formato del catalogo non riconosciuto');
    if (!rows.length) {
     const countries = await cached('famelack-countries:' + kind,
      () => fetchJSON(famelackData + kind + '/countries_metadata.json'));
@@ -211,7 +246,9 @@ function createCountryMedia() {
      const found = new RegExp('(?:^|\\s)' + key + '="([^"]*)"', 'i').exec(line);
      return found ? found[1].trim() : '';
     };
-    const comma = line.lastIndexOf(',');
+    // La virgola del nome è la prima fuori dagli attributi tra virgolette.
+    const separator=/^#EXTINF:(?:[^",]|"[^"]*")*,/.exec(line);
+    const comma=separator?separator[0].length-1:-1;
     const name = (attr('tvg-name') || (comma >= 0 ? line.slice(comma + 1) : ''))
      .replace(/\s*[ⒼⓉⓎ]\s*$/u, '').trim();
     pending = name ? {
@@ -220,9 +257,13 @@ function createCountryMedia() {
     } : null;
    } else if (line && !line.startsWith('#') && pending) {
     const stream = streamSource(line);
+    const videoId=youtubeId(line);
     // Evita siti HTML, flussi HTTP bloccati dai browser e formati non supportati.
     if (stream && (stream.hls || /\.(?:mp4|webm)(?:[?#]|$)/i.test(stream.url))) {
      pending.streams = [stream];
+     rows.push(pending);
+    }else if(videoId){
+     pending.youtube=[videoId];
      rows.push(pending);
     }
     pending = null;
@@ -245,25 +286,27 @@ function createCountryMedia() {
  function tvKey(name) {
   let key = String(name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
    .toLocaleLowerCase().replace(/\s*[ⒼⓉⓎ]\s*$/u, '')
+   .replace(/\s*\[(?:not\s*24\/7|geo-blocked)\]/gi,'')
+   .replace(/\s*\(\d{3,4}p(?:\d+)?\)/gi,'')
    .replace(/[^\p{L}\p{N}]/gu, '');
-  // Due nomi commerciali diversi per la medesima emittente genovese.
-  if (key === 'telenordgenova' || key === 'telenordtv') key = 'telenord';
+  if (['telenordgenova','telenordtv','telenorditaly'].includes(key)) key = 'telenord';
   if (key === 'teleliguriasudtls') key = 'teleliguriasud';
   return key;
  }
 
  function mergeTVEntries(collections) {
-  const rows = [], byName = new Map(), byStream = new Map();
+  const rows = [], byName = new Map(), byId = new Map();
   for (const group of collections) for (const incoming of group) {
    if (!incoming || !incoming.name) continue;
    const nameKey = tvKey(incoming.name);
    const streams = Array.isArray(incoming.streams) ? incoming.streams : [];
-   const matched = streams.map(stream => byStream.get(stream.url)).find(Boolean)
-    || (nameKey ? byName.get(nameKey) : null);
+   const id=String(incoming.tvgId||'').toLowerCase().replace(/@(?:sd|hd|fhd|uhd|4k)$/,'');
+   // Un URL condiviso non identifica un'emittente: i canali restano ricercabili separatamente.
+   const matched=(id?byId.get(id):null)||(nameKey?byName.get(nameKey):null);
    let row;
    if (matched) {
     row = matched;
-    row.streams = mergeStreams(row.streams, streams).slice(0, 16);
+    row.streams = mergeStreams(row.streams, streams);
     row.youtube = [...new Set([...(row.youtube || []), ...(incoming.youtube || [])])];
     row.sources = [...new Set([...(row.sources || []), ...(incoming.sources || [])])];
     if (!row.place && incoming.place) row.place = incoming.place;
@@ -271,31 +314,34 @@ function createCountryMedia() {
     if (!row.official && incoming.official) row.official = incoming.official;
     if (!row.href && incoming.href) row.href = incoming.href;
    } else {
-    row = {...incoming, streams:mergeStreams([], streams).slice(0,16),
+    row = {...incoming, streams:mergeStreams([], streams),
      youtube:[...(incoming.youtube || [])],sources:[...(incoming.sources || [])]};
     rows.push(row);
    }
+   row.aliases=[...new Set([...(row.aliases||[]),...(incoming.aliases||[]),incoming.name])];
    if (nameKey === 'telenord') row.name = 'Telenord';
    if (nameKey) byName.set(nameKey,row);
-   for (const stream of row.streams) byStream.set(stream.url,row);
+   if(id)byId.set(id,row);
   }
   return rows;
  }
 
- const ligurianTV = [
-  {name:'Telenord',place:'Genova',language:'Italiano',official:'https://telenord.it',
-   streams:[streamSource('https://64b16f23efbee.streamlock.net/telenord/telenord/playlist.m3u8')]},
-  {name:'TeleGenova',place:'Genova',language:'Italiano',official:'https://www.telegenova.com/',
+ const additionalTV = [
+  {name:'Telenord',place:'Genova',language:'Italiano',official:'https://telenord.it/diretta-streaming',
+   streams:[streamSource('https://64b16f23efbee.streamlock.net/telenord/telenord/playlist.m3u8'),
+    streamSource('https://5db313b643fd8.streamlock.net/Telenord/Telenord/playlist.m3u8')]},
+  {name:'TeleGenova',place:'Genova',language:'Italiano',official:'https://telegenova.it/canali/telegenova/',
    streams:[streamSource('https://64b16f23efbee.streamlock.net/telegenova/telegenova/playlist.m3u8')]},
-  {name:'Primocanale',place:'Genova',language:'Italiano',official:'https://www.primocanale.it/diretta.html',streams:[]},
+  {name:'Primocanale',place:'Genova',language:'Italiano',official:'https://www.primocanale.it/diretta.html',
+   streams:[streamSource('https://msh0203.stream.seeweb.it/live/flv:stream2.sdp/playlist.m3u8')]},
   {name:'Entella TV',place:'Lavagna',language:'Italiano',streams:[]},
   {name:'Tele Liguria Sud',place:'La Spezia',language:'Italiano',streams:[]}
- ].map(row => ({...row,streams:row.streams.filter(Boolean),youtube:[],sources:['Emittenti liguri']}));
+ ].map(row => ({...row,streams:row.streams.filter(Boolean),youtube:[],sources:['Siti delle emittenti']}));
 
  async function loadRadios(code) {
   const [browser, catalogue] = await Promise.allSettled([
-   cached('radio:' + code, () => browserRadios(code)),
-   fetchFamelack('radio', countrySlug(code))
+   catalogueWithFallback('radio-browser:'+code,()=>cached('radio:' + code, () => browserRadios(code))),
+   catalogueWithFallback('famelack-radio:'+code,()=>fetchFamelack('radio', countrySlug(code)))
   ]);
   const stations = new Map();
   function byPlace(name) {
@@ -303,7 +349,7 @@ function createCountryMedia() {
    if (!stations.has(key)) stations.set(key, new Map());
    return stations.get(key);
   }
-  for (const station of browser.value || []) {
+  for (const station of browser.value?.rows || []) {
    const name = station.name?.trim();
    if (!name) continue;
    const place = station.state?.trim() || '';
@@ -315,7 +361,7 @@ function createCountryMedia() {
    row.streams = mergeStreams(row.streams, [streamSource(station.url, hls), streamSource(station.url_resolved, hls)]);
    group.set(key, row);
   }
-  for (const station of catalogue.value || []) {
+  for (const station of catalogue.value?.rows || []) {
    const name = station.name?.trim();
    const streams = catalogueStreams(station);
    if (!name || !streams.length) continue;
@@ -331,18 +377,19 @@ function createCountryMedia() {
    }else group.set('', {name,place:station.city,streams,language});
   }
   const rows = [...stations.values()].flatMap(group => [...group.values()]).filter(row => row.streams.length);
-  return {rows, partial:browser.status === 'rejected' || catalogue.status === 'rejected'};
+  const stale=Boolean(browser.value?.stale||catalogue.value?.stale);
+  return {rows,stale,partial:stale||browser.status === 'rejected' || catalogue.status === 'rejected'};
  }
 
  async function loadTV(code) {
   const slug = countrySlug(code);
   const [catalogue, locations, iptvOrg, freeTV] = await Promise.allSettled([
-   fetchFamelack('tv', slug),
+   catalogueWithFallback('famelack-tv:'+code,()=>fetchFamelack('tv', slug)),
    cached('tv-locations', () => fetchJSON('./data/tv-localita.json')),
-   fetchTVPlaylist(iptvOrgCountryBase + slug + '.m3u', 'IPTV-org'),
-   code === 'IT' ? fetchTVPlaylist(freeTVItalyPlaylist, 'Free-TV') : Promise.resolve([])
+   catalogueWithFallback('iptv-tv:'+code,()=>fetchTVPlaylist(iptvOrgCountryBase + slug + '.m3u', 'IPTV-org')),
+   code === 'IT' ? catalogueWithFallback('free-tv:'+code,()=>fetchTVPlaylist(freeTVItalyPlaylist, 'Free-TV')) : Promise.resolve({rows:[]})
   ]);
-  const previous = Array.isArray(catalogue.value) ? catalogue.value.filter(channel =>
+  const previous = Array.isArray(catalogue.value?.rows) ? catalogue.value.rows.filter(channel =>
    channel.name && typeof channel.nanoid === 'string' && /^[A-Za-z0-9_-]+$/.test(channel.nanoid))
    .map(channel => ({
     name:channel.name,place:channel.city || locations.value?.places?.[channel.nanoid],
@@ -354,9 +401,10 @@ function createCountryMedia() {
     sources:['Famelack']
    })) : [];
   const rows = mergeTVEntries([
-   previous, iptvOrg.value || [], freeTV.value || [], code === 'IT' ? ligurianTV : []
+   code === 'IT' ? additionalTV : [], previous, iptvOrg.value?.rows || [], freeTV.value?.rows || []
   ]);
-  return {rows,partial:catalogue.status==='rejected'||iptvOrg.status==='rejected'
+  const stale=Boolean(catalogue.value?.stale||iptvOrg.value?.stale||freeTV.value?.stale);
+  return {rows,stale,partial:stale||catalogue.status==='rejected'||iptvOrg.status==='rejected'
    ||(code==='IT'&&freeTV.status==='rejected')};
  }
 
@@ -377,7 +425,7 @@ function createCountryMedia() {
   }else{
    sources.replaceChildren('Cataloghi ', link('Famelack', famelackCatalogue),
     ', ', link('IPTV-org', iptvOrgCatalogue),
-    ...(country?.code === 'IT' ? [', ', link('Free-TV Italia', freeTVCatalogue), ' e selezione di emittenti liguri'] : []),
+    ...(country?.code === 'IT' ? [', ', link('Free-TV Italia', freeTVCatalogue)] : []),
     '. Località integrate da ', link('IPTV-org', locationsSource), '.');
   }
  }
@@ -387,7 +435,24 @@ function createCountryMedia() {
    countryName=row.countryName||country?.name||'';
   const key=row.key||mediaStationKey({...row,countryCode},kind);
   return {...row,kind,countryCode,countryName,key,
-   search:normalize([row.name,row.name==='Telenord'?'Tele Nord Genova':'',row.place,italianPlaces[row.place],countryName,row.language,kind].filter(Boolean).join(' '))};
+   search:normalize([row.name,...(row.aliases||[]),row.name==='Telenord'?'Tele Nord Genova':'',row.place,italianPlaces[row.place],countryName,row.language,kind].filter(Boolean).join(' '))};
+ }
+
+ function refreshSavedFavorites(rows,type,code){
+  let changed=false;
+  for(const [key,saved] of favorites){
+   if(saved.kind!==type||saved.countryCode!==code)continue;
+   const candidates=rows.filter(row=>type==='tv'?tvKey(row.name)===tvKey(saved.name):
+    normalize(row.name)===normalize(saved.name)&&normalize(row.place||'')===normalize(saved.place||''));
+   if(candidates.length!==1)continue;
+   const latest=candidates[0];
+   const updated={...saved,streams:mergeStreams(latest.streams||[],saved.streams).slice(0,16),
+    youtube:[...new Set([...(latest.youtube||[]),...(saved.youtube||[])])],
+    official:latest.official||saved.official,href:latest.href||saved.href,
+    language:latest.language||saved.language,sources:latest.sources||saved.sources};
+   if(JSON.stringify(saved)!==JSON.stringify(updated)){favorites.set(key,updated);changed=true;}
+  }
+  if(changed)try{localStorage.setItem(MEDIA_FAVORITES_KEY,JSON.stringify([...favorites.values()]));}catch{}
  }
  function rowAction(row) {
   const type = row.kind||activeType;
@@ -445,6 +510,7 @@ function createCountryMedia() {
       'Nessuna emittente trovata per questo Paese.');
   if (partial) message = entries.length ? message + ' · Una fonte è temporaneamente indisponibile.' :
    'Il catalogo non è disponibile. Verifica la connessione e riprova.';
+  if(savedCatalogue)message+=' Sono presenti anche emittenti dell’ultimo elenco salvato. Aggiorna per riprovare.';
   status.textContent = message;
  }
 
@@ -479,12 +545,15 @@ function createCountryMedia() {
   const result=type==='favorites'?{rows:[...favorites.values()],partial:false}:
    code?await(type==='radio'?loadRadios(code):loadTV(code)):{rows:[],partial:false};
   if (request !== revision) return;
+  if(type!=='favorites')refreshSavedFavorites(result.rows,type,code);
   entries=result.rows.map(row=>prepareRow({...row,kind:row.kind||type}))
    .sort((a,b)=>sort.compare(a.name,b.name)||sort.compare(a.place||'',b.place||''));
   partial = result.partial;
+  savedCatalogue=Boolean(result.stale);
   visible = batchSize;
   filter.hidden = !entries.length;
-  retry.hidden = !partial;
+  retry.hidden = type==='favorites';
+  retry.textContent='↻ Aggiorna elenco';
   render();
  }
 
@@ -499,7 +568,7 @@ function createCountryMedia() {
  });
  filter.addEventListener('input', () => { visible = batchSize; render(); });
  more.addEventListener('click', () => { visible += batchSize; render(true); });
- retry.addEventListener('click', () => showMedia(activeType));
+ retry.addEventListener('click', () => {requests.clear();showMedia(activeType);});
 
  return (place, iso) => {
   country = place ? {name:place[0], code:iso || missingCodes[place[1]], shared:sharedCatalogues[place[1]]} : null;
@@ -508,8 +577,17 @@ function createCountryMedia() {
 }
 
 function youtubeId(url) {
- return typeof url === 'string'
-  ? /^https:\/\/www\.youtube-nocookie\.com\/embed\/([\w-]{11})(?:[?#]|$)/.exec(url)?.[1] : undefined;
+ if(typeof url!=='string')return;
+ try{
+  const parsed=new URL(url);
+  if(parsed.protocol!=='https:'||parsed.username||parsed.password)return;
+  const host=parsed.hostname.toLowerCase().replace(/^www\./,'');
+  const id=host==='youtu.be'?parsed.pathname.slice(1).split('/')[0]:
+   ['youtube.com','youtube-nocookie.com'].includes(host)?
+    (/^\/(?:embed|live)\/([\w-]{11})(?:\/|$)/.exec(parsed.pathname)?.[1]||
+     (parsed.pathname==='/watch'?parsed.searchParams.get('v'):null)):null;
+  if(/^[\w-]{11}$/.test(id||''))return id;
+ }catch{}
 }
 
 function createSleepTimer(panel, onExpire) {
@@ -594,6 +672,7 @@ function createCountryPlayer(panel, link, favoritesAPI) {
  const status = $('fbPlayerStatus');
  const links = $('fbPlayerLinks');
  const retry = $('fbPlayerRetry');
+ const nextSource=$('fbPlayerNext');
  const timerPanel=$('fbPlayerTimer');
  const volumeSlider=$('fbVolumeSlider'),volumeText=$('fbVolumeValue'),muteButton=$('fbPlayerMute');
  const favoriteButton=$('fbPlayerFavorite'),languageLabel=$('fbPlayerLanguage');
@@ -682,6 +761,7 @@ function createCountryPlayer(panel, link, favoritesAPI) {
   stopPlayback();
   links.replaceChildren();
   retry.onclick = null;
+  nextSource.onclick=null;nextSource.hidden=true;
   player.hidden = true;
   directory.hidden = false;
   panel.setAttribute('aria-labelledby', 'fbMediaTitle');
@@ -724,8 +804,12 @@ function createCountryPlayer(panel, link, favoritesAPI) {
   }
 
   const options = [...row.streams, ...(row.youtube || []).map(id => ({id}))];
+  let sourceIndex=0;
+  nextSource.hidden=options.length<2;
+  nextSource.onclick=()=>{stopPlayback();trySource((sourceIndex+1)%options.length);};
   function trySource(index) {
    if (sleepTimer.expireIfDue()) return;
+   sourceIndex=index;
    timerPanel.hidden = false;
    retry.hidden = true;
    retry.textContent = '↻ Riprova';
@@ -739,6 +823,7 @@ function createCountryPlayer(panel, link, favoritesAPI) {
     } else {
      links.hidden = false;
      status.textContent = 'Diretta non disponibile nel lettore. Puoi aprire il collegamento qui sotto.';
+     retry.hidden=false;
     }
     return;
    }
@@ -763,11 +848,12 @@ function createCountryPlayer(panel, link, favoritesAPI) {
    media.preload = 'auto';
    media.setAttribute('aria-label', 'Diretta di ' + row.name);
    currentMedia=media;viewport.append(media);applyVolume();
-   status.textContent = 'Caricamento della diretta…';
-   let cancelled = false, hls;
+   status.textContent = index?'Provo un collegamento alternativo…':'Caricamento della diretta…';
+   let cancelled = false, hls,stallTimer;
    const stop = () => {
     cancelled = true;
     clearTimeout(timer);
+    clearTimeout(stallTimer);
     hls?.destroy();
     media.pause();
     media.removeAttribute('src');
@@ -785,15 +871,24 @@ function createCountryPlayer(panel, link, favoritesAPI) {
     if (!cancelled && !sleepTimer.expireIfDue()) media.play().catch(() => {});
    };
    media.addEventListener('error', fail);
-   media.addEventListener('timeupdate', () => { if (!cancelled) sleepTimer.expireIfDue(); });
+   media.addEventListener('timeupdate', () => {
+    if (!cancelled){clearTimeout(stallTimer);stallTimer=null;sleepTimer.expireIfDue();}
+   });
+   for(const event of ['waiting','stalled'])media.addEventListener(event,()=>{
+    if(cancelled||media.paused||stallTimer)return;
+    stallTimer=setTimeout(fail,15000);
+   });
+   media.addEventListener('pause',()=>{clearTimeout(stallTimer);stallTimer=null;});
    media.addEventListener('canplay', () => {
     if (cancelled || sleepTimer.expireIfDue()) return;
     clearTimeout(timer);
+    clearTimeout(stallTimer);stallTimer=null;
     if (media.paused) status.textContent = 'Premi Riproduci per avviare la diretta.';
    });
    media.addEventListener('playing', () => {
     if (cancelled || sleepTimer.expireIfDue()) return;
     clearTimeout(timer);
+    clearTimeout(stallTimer);stallTimer=null;
     status.textContent = 'In diretta';
    });
    if (!source.hls || media.canPlayType('application/vnd.apple.mpegurl')) {
@@ -811,7 +906,7 @@ function createCountryPlayer(panel, link, favoritesAPI) {
     hls.attachMedia(media);
    }).catch(fail);
   }
-  retry.onclick = () => trySource(0);
+  retry.onclick = () => {stopPlayback();trySource(0);};
   trySource(0);
  }
 
